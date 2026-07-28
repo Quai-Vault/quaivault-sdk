@@ -1,0 +1,75 @@
+{
+  "name": "@quaivault/sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for QuaiVault multisig vaults on Quai Network",
+  "license": "MIT",
+  "author": "QuaiVault",
+  "homepage": "https://quaivault.org",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Quai-Vault/quaivault-sdk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Quai-Vault/quaivault-sdk/issues"
+  },
+  "keywords": [
+    "quai",
+    "quainetwork",
+    "multisig",
+    "quaivault",
+    "web3"
+  ],
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./abi": {
+      "types": "./dist/abi/index.d.ts",
+      "import": "./dist/abi/index.js",
+      "require": "./dist/abi/index.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "sync-abis": "tsx scripts/sync-abis.ts",
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src scripts --max-warnings 0",
+    "prepublishOnly": "npm run sync-abis -- --check && npm run typecheck && npm test && npm run build"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.93.3",
+    "quais": "~1.0.0-alpha.53",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@types/node": "^20.19.0",
+    "eslint": "^9.39.5",
+    "tsup": "^8.5.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "typescript-eslint": "^8.65.0",
+    "vitest": "^2.1.9"
+  }
+}

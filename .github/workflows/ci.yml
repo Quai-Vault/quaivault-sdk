@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The ABI drift check compares src/abi against the contracts' compiled artifacts,
+      # so the sibling repo has to be present.
+      - name: Check out quaivault-contracts
+        uses: actions/checkout@v4
+        with:
+          repository: Quai-Vault/quaivault-contracts
+          path: quaivault-contracts
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+      - name: Verify ABIs match the contracts
+        run: |
+          if [ -d quaivault-contracts/artifacts ]; then
+            npm run sync-abis -- --check --contracts quaivault-contracts
+          else
+            echo "::warning::contracts not compiled; skipping ABI drift check"
+          fi
+
+      - name: Verify the package installs and imports cleanly
+        run: |
+          npm pack
+          mkdir -p /tmp/consumer && cd /tmp/consumer
+          npm init -y >/dev/null
+          npm install "$GITHUB_WORKSPACE"/quaivault-sdk-*.tgz
+          node --input-type=module -e "
+            import { connect, isUsableQuaiAddress } from '@quaivault/sdk';
+            import { QuaiVaultAbi } from '@quaivault/sdk/abi';
+            if (typeof connect !== 'function') throw new Error('esm export missing');
+            if (!Array.isArray(QuaiVaultAbi)) throw new Error('abi subpath broken');
+            if (isUsableQuaiAddress('0x0081111111111111111111111111111111111111')) {
+              throw new Error('Qi address was accepted');
+            }
+          "
+          node -e "
+            const { connect } = require('@quaivault/sdk');
+            if (typeof connect !== 'function') throw new Error('cjs export missing');
+          "
