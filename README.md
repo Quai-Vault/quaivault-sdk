@@ -9,6 +9,10 @@ re-validate on chain before signing. Works in Node and the browser, with any sig
 npm install @quaivault/sdk
 ```
 
+**Documentation:** [quaivault.org/docs/sdk](https://quaivault.org/docs/sdk) —
+[guides](https://quaivault.org/docs/sdk-guides) ·
+[API reference](https://quaivault.org/docs/sdk-reference)
+
 ## Quick start
 
 ```ts
