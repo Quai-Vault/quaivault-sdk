@@ -22,6 +22,13 @@ npm run build
 All four run automatically via `prepublishOnly`, so a release cannot ship a failing build
 or a stale ABI.
 
+## Releasing
+
+Tag and push: `git tag v0.2.0 && git push origin v0.2.0`. The release workflow verifies the
+tag matches `package.json`, re-runs the gate against freshly compiled contracts, and
+publishes through trusted publishing (OIDC — no token). Bump the version and update
+`CHANGELOG.md` in the same commit the tag points at.
+
 ## Conventions
 
 - **ABIs are generated.** Never hand-edit `src/abi/*.json`; change the contracts and re-run

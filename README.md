@@ -365,9 +365,17 @@ npm publish
 `prepublishOnly` runs the first four automatically, so `npm publish` cannot ship a build
 that fails a check or a stale ABI.
 
-Publishing from CI can add a signed attestation with `npm publish --provenance`. It is not
-set in `publishConfig` because provenance requires an OIDC-capable CI — enabling it by
-default would make a manual publish fail with an opaque error.
+Releases go out through **npm trusted publishing**: push a `v*` tag and the release
+workflow exchanges a GitHub OIDC token for a short-lived, workflow-scoped npm credential.
+There is no `NPM_TOKEN` to leak or rotate, and provenance attestations are generated
+automatically because the repository is public.
+
+The trusted publisher is configured in the package's settings on npmjs.com and names
+`release.yml` exactly. npm does not validate that configuration when it is saved, so a
+mismatch in the org, repo or workflow filename only surfaces as a failed publish.
+
+`npm publish` from a workstation still works and is what bootstrapped `0.1.0` — a package
+must exist before a trusted publisher can be attached to it.
 
 **Version pinning.** `quais` is tracked with `~1.0.0-alpha.53` rather than `^`. It is still
 pre-1.0, so a caret range would allow 1.x minors that may change the API before release;

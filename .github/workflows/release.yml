@@ -1,16 +1,27 @@
 name: Release
 
+# Publishes via npm trusted publishing (OIDC) — no NPM_TOKEN involved.
+#
+# npm mints a short-lived, workflow-scoped credential from the OIDC token GitHub
+# issues, so there is no long-lived secret to leak or rotate, and the account's
+# "require 2FA for writes" setting no longer blocks CI (that setting governs
+# token auth, which this bypasses entirely).
+#
+# The trusted publisher is configured on npmjs.com under the package's settings and
+# must name this file — `release.yml` — exactly. npm does not validate that config
+# when saved, so a mismatch only surfaces as a failure here.
+
 on:
   push:
     tags: ['v*']
 
 permissions:
   contents: read
-  id-token: write # required for npm provenance
+  id-token: write # lets GitHub mint the OIDC token npm exchanges for a publish credential
 
 jobs:
   publish:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest # trusted publishing does not support self-hosted runners
     env:
       # `npm publish` triggers prepublishOnly, which calls sync-abis with no arguments.
       # A --contracts flag cannot reach it, so the path is supplied via the environment.
@@ -33,6 +44,12 @@ jobs:
           node-version: 22
           cache: npm
           registry-url: https://registry.npmjs.org
+
+      # Trusted publishing needs npm >= 11.5.1; Node 22 still bundles npm 10.x.
+      - name: Upgrade npm for OIDC support
+        run: |
+          npm install -g npm@^11.5.1
+          npm --version
 
       - name: Compile contracts
         working-directory: contracts
@@ -67,9 +84,7 @@ jobs:
       - run: npm test
       - run: npm run build
 
-      # Provenance is passed here rather than set in publishConfig, so a manual publish
-      # from a workstation does not fail for want of an OIDC token.
+      # No --provenance flag and no NODE_AUTH_TOKEN: trusted publishing from a public
+      # repository generates provenance automatically, and OIDC supplies the credential.
       - name: Publish to npm
-        run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish
