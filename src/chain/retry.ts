@@ -4,6 +4,11 @@
  * Scoped deliberately to **reads**. Retrying a write risks broadcasting the same
  * transaction twice — a resubmit that looks like a timeout to the client may already
  * be in the mempool — so every write path in this SDK calls through unretried.
+ *
+ * Every `Date.now()` below measures *elapsed* time and must stay on the raw local
+ * clock. `ClientOptions.now` exists for absolute timestamps compared against chain
+ * time; applying it to a duration is a category error, because a clock being 12 seconds
+ * fast does not make 30 seconds of backoff into 18.
  */
 import { AbortError } from '../errors/index.js';
 

@@ -10,6 +10,7 @@ import { Vault, type VaultContext } from './vault.js';
 import type {
   Address,
   ClientOptions,
+  Clock,
   IndexerHealth,
   NetworkConfig,
   Pagination,
@@ -22,6 +23,11 @@ import type {
  * called, so building a client is cheap and safe at module scope.
  */
 export class QuaiVaultClient {
+  /**
+   * Source of "now" for time compared against chain timestamps. Resolved once from
+   * {@link ClientOptions.now}, defaulting to the local clock. See {@link Clock}.
+   */
+  readonly now: Clock;
   /**
    * Resolved configuration, with the private key stripped and the indexer key
    * masked — safe to log. The key itself is consumed once when building the signer.
@@ -36,6 +42,7 @@ export class QuaiVaultClient {
     // `resolved` holds the secret and is never stored on the instance.
     const resolved: ResolvedConfig = resolveConfig(options);
     this.config = redactConfig(resolved);
+    this.now = resolved.now;
     this.connection = new Connection(resolved, {
       ...(options.provider ? { provider: options.provider } : {}),
       ...(options.signer ? { signer: options.signer } : {}),
@@ -81,6 +88,7 @@ export class QuaiVaultClient {
       contracts: this.config.contracts,
       consistency: this.config.consistency,
       maxIndexerLagBlocks: this.config.maxIndexerLagBlocks,
+      now: this.now,
     };
   }
 

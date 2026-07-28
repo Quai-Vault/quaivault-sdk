@@ -7,6 +7,7 @@ import {
   QuaiVaultAbi,
   SocialRecoveryModuleAbi,
 } from '../abi/index.js';
+import { nowSeconds } from '../lifecycle/status.js';
 import type { Address, Hex } from '../types.js';
 import { Operation } from '../types.js';
 import { ValidationError } from '../errors/index.js';
@@ -220,7 +221,7 @@ export function encodeMultiSend(calls: BatchCall[]): Hex {
 export function minimumExpiration(
   effectiveDelaySeconds: number,
   marginSeconds = 300,
-  at: number = Math.floor(Date.now() / 1000),
+  at: number = nowSeconds(),
 ): number {
   return at + effectiveDelaySeconds + marginSeconds;
 }

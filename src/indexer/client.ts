@@ -37,7 +37,12 @@ export class IndexerClient {
   private healthCache: { value: IndexerHealth; at: number } | null = null;
   private inflightHealth: Promise<IndexerHealth> | null = null;
 
-  /** Health results are reused for this long to keep read paths cheap. */
+  /**
+   * Health results are reused for this long to keep read paths cheap.
+   *
+   * This and `waitForBlock`'s deadline are elapsed-time arithmetic, so they use the
+   * raw local clock rather than `ClientOptions.now` — see the note in `chain/retry.ts`.
+   */
   readonly healthCacheMs: number;
 
   constructor(config: IndexerConfig, options: { healthCacheMs?: number } = {}) {

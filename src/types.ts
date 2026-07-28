@@ -60,6 +60,35 @@ export interface NetworkConfig {
  */
 export type Consistency = 'auto' | 'indexed' | 'chain';
 
+/**
+ * Source of "now", in Unix **seconds**, for decisions compared against chain time.
+ *
+ * The contracts decide with `block.timestamp`. Everything the SDK derives locally —
+ * a transaction's `ready` vs `timelocked`, what a caller may do next, whether a
+ * recovery period has elapsed — is a *prediction* of that, and a machine whose clock is
+ * wrong predicts wrongly. Containers, CI runners and VMs resumed from a snapshot drift
+ * in ways a desktop usually does not.
+ *
+ * Supplying a clock lets a consumer that has measured the offset feed it back in:
+ *
+ * ```ts
+ * const skew = localSeconds - blockTimestamp;      // positive: local clock is ahead
+ * connect({ now: () => Date.now() / 1000 - skew });
+ * ```
+ *
+ * A function rather than a scalar offset on purpose. An offset needs a sign convention,
+ * and getting it backwards doubles the error instead of cancelling it — silently. Here
+ * the arithmetic sits in the caller's own code, where it reads as what it means.
+ *
+ * This never affects elapsed-time measurement (retry backoff, timeouts, poll
+ * intervals). Those are durations: if the clock is 12 seconds fast, 30 seconds is still
+ * 30 seconds.
+ *
+ * Detection is deliberately not the SDK's job — it would mean an RPC call on behalf of
+ * a consumer who may not want one, and a cached value with no clear invalidation.
+ */
+export type Clock = () => number;
+
 export interface ClientOptions {
   network?: NetworkConfig | NetworkName;
   provider?: Provider;
@@ -74,6 +103,11 @@ export interface ClientOptions {
   maxIndexerLagBlocks?: number;
   /** Read env vars for anything not passed explicitly. Default true. */
   useEnv?: boolean;
+  /**
+   * Source of "now" for time compared against chain timestamps. See {@link Clock}.
+   * Defaults to the local clock.
+   */
+  now?: Clock;
   /**
    * Retry policy for transient RPC and indexer failures. Applies to reads only —
    * writes are never retried, since a resubmit risks a double broadcast.

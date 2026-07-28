@@ -164,9 +164,11 @@ qv.indexerHealth()
 ```ts
 vault.info() / owners() / threshold() / balance() / modules() / delegatecallTargets()
 vault.isOwner(a) / isModuleEnabled(m) / isDelegatecallAllowed(t) / isValidSignature(hash)
-vault.transaction(txHash) / pendingTransactions(page?) / transactionHistory(page?)
-vault.transactionHash(to, value, data, nonce?)
-vault.affordances(txHash, caller?) / describe(txHash, caller?)
+vault.transaction(txHash) / transactions(txHashes) / pendingTransactions(page?)
+vault.transactionHistory(page?) / transactionHash(to, value, data, nonce?)
+vault.hasApproved(txHash, owner)
+vault.affordances(txHash, caller?, at?) / describe(txHash, caller?)
+vault.view() / pinned(view)                       // explicit owners+threshold snapshot
 vault.balances(opts?) / deposits(page?) / tokenTransfers(page?) / signedMessages()
 vault.waitForExecutable(txHash, opts?)
 vault.watch(handler, opts?)                       // Supabase Realtime
@@ -334,6 +336,38 @@ The classifier errs toward *not* retrying: reverts (`CALL_EXCEPTION`), user reje
 nonce and funds errors are permanent by definition, and anything unrecognised is treated as
 permanent too — so a genuine bug surfaces immediately instead of hiding behind three slow
 attempts. Rate limits, 5xx and raw transport failures are retried.
+
+## Clock skew
+
+The contracts decide with `block.timestamp`. Everything the SDK derives locally — a
+transaction's `ready` vs `timelocked`, what a caller may do next, whether a recovery period
+has elapsed — predicts that, and a machine whose clock is wrong predicts wrongly.
+Containers, CI runners and VMs resumed from a snapshot drift in ways a desktop usually
+does not.
+
+If you have measured the offset, feed it back in:
+
+```ts
+const block = await qv.provider.getBlock('latest');
+const skew = Date.now() / 1000 - Number(block.timestamp);   // positive: local clock ahead
+
+const qv = connect({ network: 'mainnet', now: () => Date.now() / 1000 - skew });
+```
+
+A function rather than a scalar offset on purpose: an offset needs a sign convention, and
+getting it backwards doubles the error instead of cancelling it, silently. Here the
+arithmetic sits in your code, where it reads as what it means.
+
+Detection is deliberately yours. Deriving the offset costs an RPC call the SDK should not
+make on your behalf, and caching one has no clear invalidation.
+
+**This never touches elapsed-time measurement** — retry backoff, timeouts, poll intervals
+and cache TTLs stay on the raw local clock. A clock being 12 seconds fast does not make 30
+seconds of backoff into 18.
+
+Nothing here can change an on-chain outcome; the chain is the authority and a wrong local
+time fails safe into a revert or a refusal. What it changes is what the SDK *tells* you,
+which is most of what the SDK is for.
 
 ## Development
 

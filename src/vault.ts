@@ -40,6 +40,7 @@ import type {
   Affordance,
   ApprovalRecord,
   Bytes32,
+  Clock,
   ContractAddresses,
   Consistency,
   DryRunResult,
@@ -60,6 +61,11 @@ export interface VaultContext {
   contracts: ContractAddresses;
   consistency: Consistency;
   maxIndexerLagBlocks: number;
+  /**
+   * Source of "now" for comparisons against chain timestamps. See {@link Clock}.
+   * Optional so a hand-built context still works; defaults to the local clock.
+   */
+  now?: Clock;
   /** Set by {@link Vault.pinned}. Never consulted by a write precondition. */
   view?: VaultView;
 }
@@ -103,6 +109,7 @@ export class Vault {
       queries: ctx.queries,
       vaultAddress: this.address,
       moduleAddress: ctx.contracts.socialRecovery,
+      ...(ctx.now ? { now: ctx.now } : {}),
     });
   }
 
@@ -152,6 +159,16 @@ export class Vault {
   private async indexerHead(): Promise<number | undefined> {
     const health = await this.ctx.indexer?.health();
     return health?.available ? health.lastIndexedBlock : undefined;
+  }
+
+  /**
+   * Now, in Unix seconds, for anything compared against a chain timestamp.
+   *
+   * Never used to measure elapsed time — see the duration sites in
+   * {@link waitForExecutable}, which stay on the raw local clock deliberately.
+   */
+  private now(): number {
+    return (this.ctx.now ?? nowSeconds)();
   }
 
   private contract(write = false): VaultContract {
@@ -208,7 +225,7 @@ export class Vault {
       owners,
       threshold,
       ...(indexedAtBlock !== undefined ? { indexedAtBlock } : {}),
-      capturedAt: nowSeconds(),
+      capturedAt: this.now(),
       source: fromIndexer ? 'indexer' : 'chain',
     };
   }
@@ -255,6 +272,22 @@ export class Vault {
 
   async isOwner(address: Address): Promise<boolean> {
     return this.contract().isOwner(getAddress(address));
+  }
+
+  /**
+   * Whether `owner`'s approval on `txHash` currently counts toward the threshold.
+   *
+   * Reads the chain, and accounts for approval-epoch invalidation: removing an owner
+   * bumps the vault's epoch and voids every approval that address made, so a
+   * confirmation the indexer still lists may already be dead. This is the authoritative
+   * answer.
+   *
+   * Public because it is one of the two inputs {@link computeAffordances} needs. Without
+   * it a consumer wanting affordances at an adjusted time had no way to assemble an
+   * `AffordanceContext` short of reimplementing this method against the raw contract.
+   */
+  async hasApproved(txHash: Bytes32, owner: Address): Promise<boolean> {
+    return this.contract().hasApproved(normalizeTxHash(txHash), getAddress(owner));
   }
 
   /** Approvals required to execute. Prefers a pinned view, then the indexer, then chain. */
@@ -540,7 +573,7 @@ export class Vault {
       approvalCount,
       threshold,
       failed: row.status === 'failed',
-    });
+    }, this.now());
 
     const failedReturnData = row.failed_return_data ?? undefined;
 
@@ -633,7 +666,7 @@ export class Vault {
         approvedAt,
         approvalCount: approvals.length,
         threshold: Number(threshold),
-      }),
+      }, this.now()),
       approvals,
       approvalCount: approvals.length,
       threshold: Number(threshold),
@@ -653,9 +686,9 @@ export class Vault {
    * What `caller` may legally do to `txHash` right now, and when blocked actions
    * become available. Defaults to the connected signer's address.
    */
-  async affordances(txHash: Bytes32, caller?: Address): Promise<Affordance[]> {
+  async affordances(txHash: Bytes32, caller?: Address, at?: number): Promise<Affordance[]> {
     const hash = normalizeTxHash(txHash);
-    return this.resolveAffordances(hash, this.transaction(hash), caller);
+    return this.resolveAffordances(hash, this.transaction(hash), caller, at);
   }
 
   /**
@@ -671,6 +704,7 @@ export class Vault {
     hash: Bytes32,
     transaction: VaultTransaction | Promise<VaultTransaction>,
     caller?: Address,
+    at?: number,
   ): Promise<Affordance[]> {
     const who = caller ?? (await this.ctx.connection.addressOrNull());
     if (!who) {
@@ -686,7 +720,13 @@ export class Vault {
       vault.hasApproved(hash, getAddress(who)),
     ]);
 
-    return computeAffordances({ tx, caller: getAddress(who), isOwner, hasApproved });
+    return computeAffordances({
+      tx,
+      caller: getAddress(who),
+      isOwner,
+      hasApproved,
+      at: at ?? this.now(),
+    });
   }
 
   // =========================================================================
@@ -980,12 +1020,12 @@ export class Vault {
     // Reproduce the contract's ExpirationTooSoon check before signing.
     if (expiration > 0) {
       const floor = isSelfCall ? 0 : Math.max(executionDelay, await this.minExecutionDelay());
-      const earliest = minimumExpiration(floor, 0);
+      const earliest = minimumExpiration(floor, 0, this.now());
       if (expiration <= earliest) {
         throw new ValidationError(
           `expiration ${expiration} is too soon: with an effective delay of ${floor}s the vault ` +
             `requires an expiration after ${earliest}.`,
-          `Use at least ${minimumExpiration(floor)} to leave a margin for block time.`,
+          `Use at least ${minimumExpiration(floor, 300, this.now())} to leave a margin for block time.`,
         );
       }
     }
@@ -1404,8 +1444,11 @@ export class Vault {
       }
 
       // Timelocked with quorum: sleep until the clock lifts, or the next poll tick.
+      // Absolute: `executableAfter` is chain time, so this comparison uses the
+      // configured clock. The deadline and backoff below are elapsed-time arithmetic
+      // and stay on the raw local clock — offsetting a duration is meaningless.
       const untilExecutable =
-        tx.executableAfter > 0 ? tx.executableAfter * 1000 - Date.now() : pollIntervalMs;
+        tx.executableAfter > 0 ? (tx.executableAfter - this.now()) * 1000 : pollIntervalMs;
       const wait = Math.max(1_000, Math.min(untilExecutable, pollIntervalMs));
 
       if (Date.now() + wait > deadline) {
@@ -1442,7 +1485,7 @@ export class Vault {
       lines.push(`  quorum reached: ${new Date(tx.approvedAt * 1000).toISOString()}`);
     }
     if (tx.executableAfter > 0) {
-      const remaining = tx.executableAfter - nowSeconds();
+      const remaining = tx.executableAfter - this.now();
       lines.push(
         `  executable after: ${new Date(tx.executableAfter * 1000).toISOString()}` +
           (remaining > 0 ? ` (in ${remaining}s)` : ' (now)'),

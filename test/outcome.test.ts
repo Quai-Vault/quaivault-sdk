@@ -87,6 +87,54 @@ describe('classifyExecution', () => {
     expect(result.outcome).toBe('approved_only');
   });
 
+  // The two below pin the discrimination to the event's own fields rather than to the
+  // local clock. Both `approvedAt` and `executableAfter` are written under one
+  // `block.timestamp`, so their difference *is* the execution delay — no wall clock
+  // needed. The earlier fixtures all anchored to `Date.now()`, which meant they agreed
+  // with a clock-based implementation by construction and could not catch it drifting.
+
+  it('reports timelock_started from event fields alone, however far off the local clock is', () => {
+    // Both timestamps sit two decades in the past. A local-clock comparison would call
+    // this approved_only, because executableAfter is long behind "now".
+    const approvedAt = 946_684_800; // 2000-01-01
+    const result = classifyExecution(
+      receipt([log('ThresholdReached', [TX, approvedAt, approvedAt + 3600])]),
+      VAULT,
+      TX,
+    );
+    expect(result.outcome).toBe('timelock_started');
+    expect(result.executableAfter).toBe(approvedAt + 3600);
+  });
+
+  it('reports approved_only for a zero delay dated in the future', () => {
+    // The mirror image: a clock behind the chain would call this timelock_started,
+    // because executableAfter is ahead of "now" — even though no delay was applied.
+    const approvedAt = 4_102_444_800; // 2100-01-01
+    const result = classifyExecution(
+      receipt([log('ThresholdReached', [TX, approvedAt, approvedAt])]),
+      VAULT,
+      TX,
+    );
+    expect(result.outcome).toBe('approved_only');
+  });
+
+  it('is unaffected by the local clock moving under it', () => {
+    const approvedAt = 1_700_000_000;
+    const rec = receipt([log('ThresholdReached', [TX, approvedAt, approvedAt + 600])]);
+
+    const realNow = Date.now;
+    try {
+      Date.now = () => 0; // clock far behind the chain
+      const behind = classifyExecution(rec, VAULT, TX).outcome;
+      Date.now = () => 9_999_999_999_000; // clock far ahead
+      const ahead = classifyExecution(rec, VAULT, TX).outcome;
+      expect(behind).toBe('timelock_started');
+      expect(ahead).toBe('timelock_started');
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
   it('ignores events for a different transaction hash', () => {
     const other = '0x' + 'cd'.repeat(32);
     const result = classifyExecution(

@@ -1,6 +1,7 @@
 import { isAddress } from 'quais';
 import type {
   ClientOptions,
+  Clock,
   Consistency,
   ContractAddresses,
   IndexerConfig,
@@ -8,6 +9,7 @@ import type {
 } from '../types.js';
 import { ConfigError } from '../errors/index.js';
 import type { RetryOptions } from '../chain/retry.js';
+import { nowSeconds } from '../lifecycle/status.js';
 import { isNetworkName, networks } from './networks.js';
 
 /**
@@ -48,6 +50,11 @@ export interface ResolvedConfig {
   consistency: Consistency;
   maxIndexerLagBlocks: number;
   retry: RetryOptions;
+  /**
+   * Resolved source of "now" in Unix seconds. Always set — falls back to the local
+   * clock — so consumers never branch on its presence.
+   */
+  now: Clock;
 }
 
 /** A `ResolvedConfig` with the private key removed. Safe to log. */
@@ -235,6 +242,9 @@ export function resolveConfig(options: ClientOptions = {}): ResolvedConfig {
     consistency,
     maxIndexerLagBlocks:
       options.maxIndexerLagBlocks ?? parseLag(env[ENV_VARS.maxIndexerLagBlocks]) ?? 50,
+    // Deliberately not environment-configurable: a clock is a function, and a numeric
+    // offset in an env var would reintroduce the sign convention `Clock` exists to avoid.
+    now: options.now ?? nowSeconds,
     retry: {
       ...(options.retry?.maxAttempts != null ? { maxAttempts: options.retry.maxAttempts } : {}),
       ...(options.retry?.baseDelayMs != null ? { baseDelayMs: options.retry.baseDelayMs } : {}),

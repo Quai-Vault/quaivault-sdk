@@ -19,6 +19,7 @@ import type { ReceiptLike } from './lifecycle/outcome.js';
 import type {
   Address,
   Bytes32,
+  Clock,
   Hex,
   RecoveryAffordance,
   RecoveryConfig,
@@ -30,6 +31,8 @@ export interface RecoveryModuleContext {
   queries: IndexerQueries | null;
   vaultAddress: Address;
   moduleAddress: Address | undefined;
+  /** Source of "now" for comparisons against chain timestamps. See {@link Clock}. */
+  now?: Clock;
 }
 
 /**
@@ -69,6 +72,11 @@ export class RecoveryModule {
    * them gates a write, so none of them should be the one read that silently skips
    * transient-failure handling.
    */
+  /** Now, in Unix seconds, for anything compared against a chain timestamp. */
+  private now(): number {
+    return (this.ctx.now ?? nowSeconds)();
+  }
+
   private vaultContract(): VaultContract {
     return new VaultContract(this.ctx.connection.vault(this.vault), this.ctx.connection.retry);
   }
@@ -175,7 +183,7 @@ export class RecoveryModule {
               requiredThreshold: row.required_threshold,
               executionTime: Number(row.execution_time),
               expiration: Number(row.expiration ?? 0),
-            }),
+            }, this.now()),
       executed: row.status === 'executed',
       initiator: getAddress(row.initiator_address),
       source: 'indexer' as const,
@@ -308,7 +316,7 @@ export class RecoveryModule {
         `Not enough guardian approvals: ${request.approvalCount} of ${request.requiredThreshold}.`,
       );
     }
-    const now = nowSeconds();
+    const now = this.now();
     if (now < request.executionTime) {
       throw new PreconditionError(
         `The recovery period has not elapsed. Executable after ` +
@@ -367,7 +375,11 @@ export class RecoveryModule {
   // =========================================================================
 
   /** What `caller` may do to a recovery right now, and when blocked actions unlock. */
-  async affordances(recoveryHash: Bytes32, caller?: Address): Promise<RecoveryAffordance[]> {
+  async affordances(
+    recoveryHash: Bytes32,
+    caller?: Address,
+    at?: number,
+  ): Promise<RecoveryAffordance[]> {
     const hash = normalizeTxHash(recoveryHash, 'recovery hash');
     const who = caller ?? (await this.ctx.connection.addressOrNull());
     if (!who) {
@@ -385,7 +397,7 @@ export class RecoveryModule {
       this.vaultContract().isOwner(address),
     ]);
 
-    const now = nowSeconds();
+    const now = at ?? this.now();
     const terminal = request.status === 'executed' || request.status === 'cancelled';
     const expired = now > request.expiration && request.expiration > 0;
     const quorum = request.approvalCount >= request.requiredThreshold;
@@ -502,13 +514,10 @@ export class RecoveryModule {
     const requiredThreshold = Number(raw.requiredThreshold ?? 0);
     const executed = Boolean(raw.executed);
 
-    const status = deriveRecoveryStatus({
-      executed,
-      approvalCount,
-      requiredThreshold,
-      executionTime,
-      expiration,
-    });
+    const status = deriveRecoveryStatus(
+      { executed, approvalCount, requiredThreshold, executionTime, expiration },
+      this.now(),
+    );
 
     return {
       hash,
@@ -553,7 +562,7 @@ export class RecoveryModule {
     if (request.executed) {
       throw new PreconditionError('This recovery has already been executed.');
     }
-    if (request.expiration > 0 && nowSeconds() > request.expiration) {
+    if (request.expiration > 0 && this.now() > request.expiration) {
       throw new PreconditionError('This recovery has expired.', {
         remediation: 'Call expire() to clean it up, then initiate a new recovery.',
       });

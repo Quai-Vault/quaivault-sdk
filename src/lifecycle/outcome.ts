@@ -119,10 +119,18 @@ export function classifyExecution(
   // started. The caller must come back after the delay.
   const thresholdReached = eventFor(events, 'ThresholdReached', txHash);
   if (thresholdReached) {
+    const approvedAt = toNumber(thresholdReached.args.approvedAt);
     const executableAfter = toNumber(thresholdReached.args.executableAfter);
-    // A zero delay reaching threshold without executing means approveAndExecute
-    // recorded the final approval but the caller used the approve-only path.
-    if (executableAfter > Math.floor(Date.now() / 1000)) {
+    // Both fields come from the same event, computed under one `block.timestamp`, so
+    // `executableAfter > approvedAt` is exactly "a non-zero delay was applied" — the
+    // question this branch is actually asking.
+    //
+    // This used to compare `executableAfter` against the local clock, which is a proxy
+    // that holds only while local skew stays smaller than the delay: a vault with a
+    // 60-second timelock misclassified under two minutes of drift, while one with a
+    // 24-hour timelock never did. Same code, silently different reliability, and the
+    // wrong answer here tells the user the opposite of what happened to their funds.
+    if (executableAfter > approvedAt) {
       return {
         ...base,
         outcome: 'timelock_started',
