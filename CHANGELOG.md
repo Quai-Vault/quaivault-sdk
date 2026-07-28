@@ -12,6 +12,11 @@ version is `0.x`, minor bumps may contain breaking changes.
 
 Initial release.
 
+### Requirements
+
+- **Node 22 or later.** `@supabase/supabase-js` declares the same floor: it constructs a
+  Realtime client eagerly and needs a global `WebSocket`, which Node 20 does not provide.
+
 ### Added
 
 - **Client** — `connect()` with configuration resolving explicit options → environment →
