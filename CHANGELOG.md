@@ -8,6 +8,15 @@ version is `0.x`, minor bumps may contain breaking changes.
 
 ## [Unreleased]
 
+## [0.1.1] — 2026-07-28
+
+No functional changes. This is the first release published through npm trusted
+publishing, which exercises the release pipeline end to end and attaches a provenance
+attestation linking the package to the exact commit and workflow run that built it.
+
+`0.1.0` was published by hand to bootstrap the package, because a trusted publisher can
+only be attached to a package that already exists — so it carries no attestation.
+
 ## [0.1.0] — 2026-07-28
 
 Initial release.
