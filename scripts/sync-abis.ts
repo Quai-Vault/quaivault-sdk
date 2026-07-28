@@ -30,8 +30,20 @@ interface Artifact {
   bytecode: string;
 }
 
+/**
+ * Locate the contracts repo.
+ *
+ * Precedence: `--contracts <path>` → `QUAIVAULT_CONTRACTS` → the sibling directory.
+ *
+ * The env var exists for CI, where the contracts are checked out inside the workspace
+ * rather than beside it. It matters for `npm publish` specifically: `prepublishOnly`
+ * invokes this script without arguments, so a flag alone cannot reach it.
+ */
 function parseArgs(argv: string[]) {
-  let contracts = resolve(HERE, '..', '..', 'quaivault-contracts');
+  let contracts =
+    process.env.QUAIVAULT_CONTRACTS?.trim() ||
+    resolve(HERE, '..', '..', 'quaivault-contracts');
+  contracts = resolve(contracts);
   let check = false;
   for (let i = 0; i < argv.length; i++) {
     // Safe: the `argv[i + 1]` guard on this same line proves the index exists.
@@ -50,7 +62,7 @@ function main() {
     console.error(
       `[sync-abis] No artifacts at ${artifactRoot}\n` +
         `            Run \`npx hardhat compile\` in ${contracts} first, ` +
-        `or pass --contracts <path>.`,
+        `pass --contracts <path>, or set QUAIVAULT_CONTRACTS.`,
     );
     process.exit(1);
   }

@@ -11,13 +11,40 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    env:
+      # `npm publish` triggers prepublishOnly, which calls sync-abis with no arguments.
+      # A --contracts flag cannot reach it, so the path is supplied via the environment.
+      QUAIVAULT_CONTRACTS: ${{ github.workspace }}/contracts
     steps:
       - uses: actions/checkout@v4
+
+      # `prepublishOnly` runs `sync-abis --check`, which compares src/abi against the
+      # contracts' compiled artifacts. Without this checkout the publish aborts, because
+      # the script correctly refuses to pass when it has nothing to compare against.
+      # `artifacts/` is gitignored upstream, so it has to be compiled here.
+      - name: Check out quaivault-contracts
+        uses: actions/checkout@v4
+        with:
+          repository: Quai-Vault/quaivault-contracts
+          path: contracts
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
           registry-url: https://registry.npmjs.org
+
+      - name: Compile contracts
+        working-directory: contracts
+        run: |
+          npm ci
+          npx hardhat compile
+
+      - name: Confirm artifacts were produced
+        run: test -d contracts/artifacts/contracts || {
+          echo "::error::hardhat produced no artifacts; refusing to publish unverified ABIs";
+          exit 1;
+          }
 
       - run: npm ci
 
@@ -30,9 +57,19 @@ jobs:
             exit 1
           fi
 
-      # prepublishOnly runs sync-abis --check, typecheck, test and build.
-      # Provenance is passed here rather than set in publishConfig, so a manual
-      # publish from a workstation does not fail for want of an OIDC token.
-      - run: npm publish --provenance --access public
+      # Fail fast on drift before the publish, rather than discovering it inside
+      # prepublishOnly. Both resolve the contracts through QUAIVAULT_CONTRACTS.
+      - name: Verify ABIs match the contracts
+        run: npm run sync-abis -- --check
+
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+      # Provenance is passed here rather than set in publishConfig, so a manual publish
+      # from a workstation does not fail for want of an OIDC token.
+      - name: Publish to npm
+        run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
