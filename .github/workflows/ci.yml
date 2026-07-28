@@ -7,17 +7,10 @@ on:
 
 jobs:
   check:
+    name: Lint, typecheck, test, build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      # The ABI drift check compares src/abi against the contracts' compiled artifacts,
-      # so the sibling repo has to be present.
-      - name: Check out quaivault-contracts
-        uses: actions/checkout@v4
-        with:
-          repository: Quai-Vault/quaivault-contracts
-          path: quaivault-contracts
 
       - uses: actions/setup-node@v4
         with:
@@ -30,30 +23,105 @@ jobs:
       - run: npm test
       - run: npm run build
 
-      - name: Verify ABIs match the contracts
-        run: |
-          if [ -d quaivault-contracts/artifacts ]; then
-            npm run sync-abis -- --check --contracts quaivault-contracts
-          else
-            echo "::warning::contracts not compiled; skipping ABI drift check"
-          fi
+  package:
+    name: Packaged tarball installs and imports
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: Verify the package installs and imports cleanly
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+      - run: npm pack
+
+      # Catches export-map mistakes a source-tree test cannot: a broken "exports"
+      # field, a missing subpath, or types that fail to resolve for a consumer.
+      - name: Install into a clean project
         run: |
-          npm pack
           mkdir -p /tmp/consumer && cd /tmp/consumer
           npm init -y >/dev/null
           npm install "$GITHUB_WORKSPACE"/quaivault-sdk-*.tgz
+
+      - name: Import via ESM
+        working-directory: /tmp/consumer
+        run: |
           node --input-type=module -e "
             import { connect, isUsableQuaiAddress } from '@quaivault/sdk';
             import { QuaiVaultAbi } from '@quaivault/sdk/abi';
-            if (typeof connect !== 'function') throw new Error('esm export missing');
+            if (typeof connect !== 'function') throw new Error('esm entry export missing');
             if (!Array.isArray(QuaiVaultAbi)) throw new Error('abi subpath broken');
             if (isUsableQuaiAddress('0x0081111111111111111111111111111111111111')) {
               throw new Error('Qi address was accepted');
             }
           "
+
+      - name: Import via CommonJS
+        working-directory: /tmp/consumer
+        run: |
           node -e "
-            const { connect } = require('@quaivault/sdk');
-            if (typeof connect !== 'function') throw new Error('cjs export missing');
+            const { connect, decodeRevert } = require('@quaivault/sdk');
+            const { QuaiVaultAbi } = require('@quaivault/sdk/abi');
+            if (typeof connect !== 'function') throw new Error('cjs entry export missing');
+            if (!Array.isArray(QuaiVaultAbi)) throw new Error('cjs abi subpath broken');
+            if (decodeRevert('0x4b9fc0de')?.name !== 'AlreadyAnOwner') {
+              throw new Error('revert decoding broken');
+            }
           "
+
+      - name: Types resolve under strict mode
+        working-directory: /tmp/consumer
+        run: |
+          npm install -D typescript@5 >/dev/null
+          cat > t.ts <<'TS'
+          import { connect, type VaultTransaction, type ExecuteResult } from '@quaivault/sdk';
+          const qv = connect({ network: 'testnet' });
+          export const f = (): Promise<VaultTransaction> =>
+            qv.vault('0x00aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
+              .transaction('0x' + 'ab'.repeat(32));
+          export const g = (r: ExecuteResult) => r.outcome;
+          TS
+          npx tsc --noEmit --strict --moduleResolution bundler --module esnext \
+                  --target es2022 --skipLibCheck t.ts
+
+  abi-drift:
+    name: ABIs match quaivault-contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # `artifacts/` is gitignored in quaivault-contracts, so checking that repo out
+      # yields source only. The ABIs must be compiled here — otherwise this job would
+      # find no artifacts and pass without having verified anything.
+      - name: Check out quaivault-contracts
+        uses: actions/checkout@v4
+        with:
+          repository: Quai-Vault/quaivault-contracts
+          path: contracts
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Compile contracts
+        working-directory: contracts
+        # hardhat.config.ts defaults every env var it reads, and each network's account
+        # list falls back to empty, so compilation needs no configuration or secrets.
+        run: |
+          npm ci
+          npx hardhat compile
+
+      - name: Confirm artifacts were produced
+        # Guards against a silent pass if the contracts build layout ever changes.
+        run: test -d contracts/artifacts/contracts || {
+          echo "::error::hardhat produced no artifacts; the drift check cannot run";
+          exit 1;
+          }
+
+      - run: npm ci
+
+      - name: Fail if src/abi drifted from the compiled artifacts
+        run: npm run sync-abis -- --check --contracts contracts
