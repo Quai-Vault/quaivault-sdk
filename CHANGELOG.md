@@ -8,6 +8,50 @@ version is `0.x`, minor bumps may contain breaking changes.
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-07-28
+
+Answers the CLI team's [clock-offset request](docs/request-clock-offset.md); the reasoning,
+including where we implemented something different from what was asked, is in
+[`docs/response-clock-offset.md`](docs/response-clock-offset.md). Additive only — no
+breaking changes.
+
+### Fixed
+
+- **`classifyExecution` no longer consults the local clock.** It discriminated
+  `timelock_started` from `approved_only` by comparing `executableAfter` against
+  `Date.now()`. That is a proxy that holds only while local clock skew stays smaller than
+  the execution delay, so a vault with a 60-second timelock misreported under two minutes
+  of drift while one with a 24-hour timelock never did — same code, silently different
+  reliability. It now compares `executableAfter` against `approvedAt`, both carried by the
+  same `ThresholdReached` event under one `block.timestamp`, which answers the question
+  exactly and cannot be defeated by a wrong clock.
+
+  The existing tests could not catch this: their fixtures were anchored to `Date.now()`, so
+  they agreed with the clock-based implementation by construction. The new cases use
+  timestamps decades away from the local clock in both directions.
+
+### Added
+
+- **`ClientOptions.now?: Clock`** — supply the source of "now", in Unix seconds, for
+  decisions compared against chain timestamps. Defaults to the local clock; no behaviour
+  change when unset. A function rather than a scalar offset, because an offset needs a sign
+  convention and getting it backwards doubles the error silently.
+
+  Threaded into every absolute-time site: transaction and recovery status derivation,
+  affordances, recovery preconditions, `minimumExpiration`, `view().capturedAt`, and
+  `waitForExecutable`'s comparison against `executableAfter`.
+
+  **Not** applied to elapsed-time arithmetic — retry backoff, salt-mining timeouts, poll
+  deadlines and cache TTLs stay on the raw local clock, since offsetting a duration is
+  meaningless. The split is documented at each site.
+- **`Vault.hasApproved(txHash, owner)`** — now public. It is one of the two inputs
+  `computeAffordances` needs, and its absence meant a consumer wanting affordances at an
+  adjusted time had no way to assemble an `AffordanceContext` without reimplementing the
+  method against the raw contract.
+- **`at?: number`** on `Vault.affordances()` and `RecoveryModule.affordances()`, overriding
+  the configured clock per call.
+- **`Clock`** type export, and `QuaiVaultClient.now`.
+
 ## [0.2.0] — 2026-07-28
 
 A full-surface review for security, stability, efficiency, scalability and succinctness.
