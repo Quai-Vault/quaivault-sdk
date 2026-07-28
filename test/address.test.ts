@@ -8,6 +8,7 @@ import {
 } from '../src/address.js';
 import { ValidationError } from '../src/errors/index.js';
 import { connect } from '../src/client.js';
+import { selfCall } from '../src/encode/index.js';
 
 // Zone is the first byte; the ledger is the 9th bit — the high bit of the second byte.
 const QUAI_C1 = '0x0011111111111111111111111111111111111111'; // zone 0x00, Quai
@@ -170,9 +171,19 @@ describe('Qi addresses are rejected at every entry point that commits a role or 
     ).rejects.toThrow(/newOwners\[0\]/);
   });
 
-  it('still allows REMOVING a Qi address that predates the guard', async () => {
+  it('still allows ENCODING a removal for a Qi address', () => {
     // Removal must stay lenient, or a vault that admitted a Qi owner before this
     // check existed could never clean it up.
-    await expect(vault.propose.removeOwner(QI_C1)).rejects.toThrow(/is not an owner/);
+    //
+    // Asserted at the encoder rather than through `propose.removeOwner`, because that
+    // method reads the live owner set before encoding — a network round-trip that has
+    // no place in a unit suite. `propose.removeOwner` reaching its ownership
+    // precondition (rather than a ledger ValidationError) is what proves the vault
+    // layer agrees; that is covered by the e2e suite, not here.
+    expect(() => selfCall.removeOwner(QI_C1)).not.toThrow();
+    expect(() => selfCall.removeOwner(NO_ZONE)).not.toThrow();
+
+    // Contrast: the additive path does reject.
+    expect(() => assertQuaiAddress(QI_C1, 'owner')).toThrow(ValidationError);
   });
 });
