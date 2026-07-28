@@ -5,6 +5,7 @@
  * transaction twice — a resubmit that looks like a timeout to the client may already
  * be in the mempool — so every write path in this SDK calls through unretried.
  */
+import { AbortError } from '../errors/index.js';
 
 export interface RetryOptions {
   /** Total attempts including the first. Default 3. */
@@ -115,7 +116,7 @@ export function isTransient(error: unknown): boolean {
 const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
   new Promise((resolve, reject) => {
     if (signal?.aborted) {
-      reject(new Error('Aborted'));
+      reject(new AbortError('Waiting to retry'));
       return;
     }
     const timer = setTimeout(() => {
@@ -124,7 +125,7 @@ const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
     }, ms);
     const onAbort = () => {
       clearTimeout(timer);
-      reject(new Error('Aborted'));
+      reject(new AbortError('Waiting to retry'));
     };
     signal?.addEventListener('abort', onAbort, { once: true });
   });
@@ -143,7 +144,7 @@ export async function withRetry<T>(fn: () => Promise<T>, options: RetryOptions =
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    if (options.signal?.aborted) throw new Error('Aborted');
+    if (options.signal?.aborted) throw new AbortError('The retried operation');
     try {
       return await fn();
     } catch (error) {

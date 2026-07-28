@@ -1,6 +1,13 @@
 import { Contract, JsonRpcProvider, Wallet, getZoneForAddress, isQuaiAddress } from 'quais';
 import type { Provider, Signer } from 'quais';
-import { QuaiVaultAbi, QuaiVaultFactoryAbi, SocialRecoveryModuleAbi } from '../abi/index.js';
+import {
+  Erc1155Abi,
+  Erc20Abi,
+  Erc721Abi,
+  QuaiVaultAbi,
+  QuaiVaultFactoryAbi,
+  SocialRecoveryModuleAbi,
+} from '../abi/index.js';
 import type { Address } from '../types.js';
 import { ConfigError, NoSignerError, ValidationError } from '../errors/index.js';
 import type { ResolvedConfig } from '../config/resolve.js';
@@ -79,6 +86,18 @@ export class Connection {
       SocialRecoveryModuleAbi,
       write ? this.requireSigner('This recovery write') : this.provider,
     );
+  }
+
+  /**
+   * Read-only handle to a token contract.
+   *
+   * No write variant: the SDK never calls a token directly. Moving tokens goes
+   * through the vault's proposal flow, which encodes the transfer as calldata.
+   */
+  token(address: Address, standard: 'ERC20' | 'ERC721' | 'ERC1155'): Contract {
+    const abi =
+      standard === 'ERC20' ? Erc20Abi : standard === 'ERC721' ? Erc721Abi : Erc1155Abi;
+    return new Contract(address, abi as unknown as string[], this.provider);
   }
 }
 

@@ -23,6 +23,7 @@ import {
   type BatchCall,
 } from './encode/index.js';
 import {
+  AbortError,
   NoIndexerError,
   NotFoundError,
   PreconditionError,
@@ -30,6 +31,7 @@ import {
   StaleProposalError,
   ValidationError,
 } from './errors/index.js';
+import { DEFAULT_CONCURRENCY, mapPooled } from './pool.js';
 import { computeAffordances } from './lifecycle/affordances.js';
 import { classifyExecution, extractProposedTxHash, type ReceiptLike } from './lifecycle/outcome.js';
 import { deriveStatus, executableAfterOf, nowSeconds } from './lifecycle/status.js';
@@ -58,6 +60,30 @@ export interface VaultContext {
   contracts: ContractAddresses;
   consistency: Consistency;
   maxIndexerLagBlocks: number;
+  /** Set by {@link Vault.pinned}. Never consulted by a write precondition. */
+  view?: VaultView;
+}
+
+/**
+ * Owners and threshold, captured at one instant.
+ *
+ * The SDK deliberately holds no read cache: the owner set decides which approvals
+ * count toward the threshold, and serving a stale one silently would reintroduce the
+ * exact bug `buildTransaction` intersects confirmations to avoid. An implicit TTL
+ * would make that failure invisible and intermittent.
+ *
+ * So the staleness window is the caller's to open, and to see. `capturedAt` is right
+ * there in the object; a CLI rendering one screen can pin a view for that screen and
+ * know precisely what it pinned.
+ */
+export interface VaultView {
+  owners: Address[];
+  threshold: number;
+  /** Indexer head when this was taken; absent if the snapshot came from chain. */
+  indexedAtBlock?: number;
+  /** Unix seconds. How stale the snapshot is allowed to get is the caller's call. */
+  capturedAt: number;
+  source: 'indexer' | 'chain';
 }
 
 /** A handle to one deployed vault. Cheap to construct; performs no I/O until used. */
@@ -112,6 +138,22 @@ export class Vault {
     return this.ctx.queries;
   }
 
+  /**
+   * The indexer's head, for stamping onto records read from it.
+   *
+   * Reads the cached health result rather than querying `indexer_state` directly.
+   * `useIndexer()` has just called `health()` on this same code path and the result is
+   * cached, so this is free — whereas a `state()` call is a second round trip per
+   * hydration, paid on every indexed read purely to fill one advisory field.
+   *
+   * Undefined when the indexer is not answering: a head of 0 would read as "indexed at
+   * genesis" rather than "unknown".
+   */
+  private async indexerHead(): Promise<number | undefined> {
+    const health = await this.ctx.indexer?.health();
+    return health?.available ? health.lastIndexedBlock : undefined;
+  }
+
   private contract(write = false): VaultContract {
     return new VaultContract(this.ctx.connection.vault(this.address, write), this.ctx.connection.retry);
   }
@@ -143,8 +185,50 @@ export class Vault {
     };
   }
 
-  /** Active owners. Prefers the indexer, falls back to chain. */
+  /**
+   * Capture owners and threshold once, for reuse across a burst of reads.
+   *
+   * Pair with {@link pinned}:
+   *
+   * ```ts
+   * const view = await vault.view();
+   * const pinned = vault.pinned(view);
+   * // every read below shares one owner/threshold read
+   * const txs = await pinned.transactions(hashes);
+   * ```
+   */
+  async view(): Promise<VaultView> {
+    const fromIndexer = await this.useIndexer();
+    const [owners, threshold, indexedAtBlock] = await Promise.all([
+      this.owners(),
+      this.threshold(),
+      this.indexerHead(),
+    ]);
+    return {
+      owners,
+      threshold,
+      ...(indexedAtBlock !== undefined ? { indexedAtBlock } : {}),
+      capturedAt: nowSeconds(),
+      source: fromIndexer ? 'indexer' : 'chain',
+    };
+  }
+
+  /**
+   * A handle that answers {@link owners} and {@link threshold} from `view` instead of
+   * re-reading them.
+   *
+   * Reads only. Write preconditions go through `chainOwners` / `chainThreshold`, which
+   * bypass the snapshot by construction — pinning a view can never cause this SDK to
+   * sign against a stale owner set. Everything else about the handle, including the
+   * connection and the recovery module, is shared with the original.
+   */
+  pinned(view: VaultView): Vault {
+    return new Vault(this.address, { ...this.ctx, view });
+  }
+
+  /** Active owners. Prefers a pinned view, then the indexer, then chain. */
   async owners(): Promise<Address[]> {
+    if (this.ctx.view) return this.ctx.view.owners;
     if (await this.useIndexer()) {
       try {
         const owners = await this.requireQueries('owners').owners(this.address);
@@ -153,6 +237,19 @@ export class Vault {
         // fall through to chain
       }
     }
+    return this.chainOwners();
+  }
+
+  /**
+   * Owners straight from the chain, bypassing the indexer entirely.
+   *
+   * {@link owners} prefers the indexer, which is right for display and wrong for
+   * anything that gates a write. A lagging indexer would let the SDK build a proposal
+   * against an owner set that no longer exists — admitting a `removeOwner` that drops
+   * the vault below its threshold, or rejecting one that is perfectly valid. Every
+   * propose-time precondition reads through here instead.
+   */
+  private async chainOwners(): Promise<Address[]> {
     return (await this.contract().getOwners()).map((o) => getAddress(String(o)));
   }
 
@@ -160,7 +257,25 @@ export class Vault {
     return this.contract().isOwner(getAddress(address));
   }
 
+  /** Approvals required to execute. Prefers a pinned view, then the indexer, then chain. */
   async threshold(): Promise<number> {
+    if (this.ctx.view) return this.ctx.view.threshold;
+    if (await this.useIndexer()) {
+      try {
+        const wallet = await this.requireQueries('threshold').wallet(this.address);
+        if (wallet) return wallet.threshold;
+      } catch {
+        // fall through to chain
+      }
+    }
+    return this.chainThreshold();
+  }
+
+  /**
+   * Threshold straight from the chain. The write-path counterpart to {@link threshold},
+   * for the same reason {@link chainOwners} exists.
+   */
+  private async chainThreshold(): Promise<number> {
     return Number(await this.contract().threshold());
   }
 
@@ -235,6 +350,60 @@ export class Vault {
     return this.fromChain(hash);
   }
 
+  /**
+   * Several transactions at once, keyed by hash.
+   *
+   * The plural form exists because the singular one is expensive to loop: each
+   * `transaction()` re-reads the owner set, the threshold and the indexer head, so
+   * fetching fifty costs fifty times that. This resolves the whole set the way the
+   * listing methods already do — one query for the rows, one owner/threshold read
+   * shared across them, one batched confirmations query.
+   *
+   * Hashes the indexer does not have fall back to chain reads, bounded by a pool.
+   * Hashes that exist nowhere are simply absent from the map rather than throwing:
+   * one unknown hash should not lose the caller the other forty-nine.
+   */
+  async transactions(txHashes: Bytes32[]): Promise<Map<Bytes32, VaultTransaction>> {
+    const hashes = [...new Set(txHashes.map((h) => normalizeTxHash(h)))];
+    const found = new Map<Bytes32, VaultTransaction>();
+    if (hashes.length === 0) return found;
+
+    if (await this.useIndexer()) {
+      try {
+        const queries = this.requireQueries('Reading transactions');
+        const [rows, owners, threshold] = await Promise.all([
+          queries.transactionsByHash(this.address, hashes),
+          this.owners(),
+          this.threshold(),
+        ]);
+        for (const tx of await this.hydrateRows(rows, owners, threshold)) {
+          found.set(tx.hash.toLowerCase(), tx);
+        }
+      } catch {
+        // fall through — every hash is resolved from chain below
+      }
+    }
+
+    const missing = hashes.filter((hash) => !found.has(hash));
+    if (missing.length > 0) {
+      const resolved = await mapPooled(missing, DEFAULT_CONCURRENCY, async (hash) => {
+        try {
+          return await this.fromChain(hash);
+        } catch (err) {
+          // A hash that exists on neither side is a miss, not a failure. Anything
+          // else — an RPC outage, a malformed response — is the caller's to see.
+          if (err instanceof NotFoundError) return null;
+          throw err;
+        }
+      });
+      for (const tx of resolved) {
+        if (tx) found.set(tx.hash.toLowerCase(), tx);
+      }
+    }
+
+    return found;
+  }
+
   async pendingTransactions(options: Pagination = {}): Promise<VaultTransaction[]> {
     const queries = this.requireQueries('Listing pending transactions');
     const [rows, owners, threshold] = await Promise.all([
@@ -274,7 +443,7 @@ export class Vault {
       this.address,
       rows.map((r) => r.tx_hash),
     );
-    const indexedAtBlock = (await this.ctx.indexer?.state())?.lastIndexedBlock;
+    const indexedAtBlock = await this.indexerHead();
 
     return rows.map((row) => {
       const confirmed = (confirmations.get(row.tx_hash.toLowerCase()) ?? []).map(
@@ -300,7 +469,7 @@ export class Vault {
     if (!row) return null;
 
     const confirmations = await queries.confirmations(this.address, hash);
-    const indexedAtBlock = (await this.ctx.indexer?.state())?.lastIndexedBlock;
+    const indexedAtBlock = await this.indexerHead();
 
     return this.buildTransaction({
       row,
@@ -382,7 +551,10 @@ export class Vault {
       value,
       data,
       proposer: getAddress(row.submitted_by),
-      proposedAt: toNumber(row.submitted_at_block),
+      // The indexer records the block, not the chain timestamp — they are not
+      // interchangeable, and reporting a block number as `proposedAt` renders as 1970.
+      proposedAt: 0,
+      proposedAtBlock: toNumber(row.submitted_at_block),
       kind: decodeResult.kind,
       decoded: decodeResult.decoded,
       summary: decodeResult.summary,
@@ -483,6 +655,23 @@ export class Vault {
    */
   async affordances(txHash: Bytes32, caller?: Address): Promise<Affordance[]> {
     const hash = normalizeTxHash(txHash);
+    return this.resolveAffordances(hash, this.transaction(hash), caller);
+  }
+
+  /**
+   * Shared body of {@link affordances}, taking the transaction either as a value or as
+   * an in-flight promise.
+   *
+   * The promise form is the point: a caller that already holds the record (like
+   * {@link describe}) passes it and skips a redundant fetch, while `affordances()`
+   * passes the unawaited promise so the transaction read still overlaps the two
+   * ownership probes rather than serialising behind them.
+   */
+  private async resolveAffordances(
+    hash: Bytes32,
+    transaction: VaultTransaction | Promise<VaultTransaction>,
+    caller?: Address,
+  ): Promise<Affordance[]> {
     const who = caller ?? (await this.ctx.connection.addressOrNull());
     if (!who) {
       throw new ValidationError(
@@ -492,7 +681,7 @@ export class Vault {
 
     const vault = this.contract();
     const [tx, isOwner, hasApproved] = await Promise.all([
-      this.transaction(hash),
+      transaction,
       vault.isOwner(getAddress(who)),
       vault.hasApproved(hash, getAddress(who)),
     ]);
@@ -626,7 +815,8 @@ export class Vault {
       this.proposeSelfCall(selfCall.addOwner(assertQuaiAddress(owner, 'owner')), options),
 
     removeOwner: async (owner: Address, options: ProposeOptions = {}) => {
-      const [owners, threshold] = await Promise.all([this.owners(), this.threshold()]);
+      // Chain reads, not `owners()`: this gates a signature. See `chainOwners`.
+      const [owners, threshold] = await Promise.all([this.chainOwners(), this.chainThreshold()]);
       if (!owners.some((o) => o.toLowerCase() === owner.toLowerCase())) {
         throw new PreconditionError(`${owner} is not an owner of this vault.`);
       }
@@ -640,7 +830,8 @@ export class Vault {
     },
 
     changeThreshold: async (threshold: number, options: ProposeOptions = {}) => {
-      const owners = await this.owners();
+      // Chain read, not `owners()`: this gates a signature. See `chainOwners`.
+      const owners = await this.chainOwners();
       if (threshold < 1 || threshold > owners.length) {
         throw new ValidationError(
           `Invalid threshold ${threshold}: this vault has ${owners.length} owners.`,
@@ -1189,9 +1380,7 @@ export class Vault {
     const deadline = Date.now() + timeoutMs;
 
     for (;;) {
-      if (options.signal?.aborted) {
-        throw new PreconditionError('Waiting for the transaction was aborted.');
-      }
+      if (options.signal?.aborted) throw new AbortError('Waiting for the transaction');
 
       const tx = await this.fromChain(hash);
       options.onPoll?.(tx);
@@ -1266,7 +1455,8 @@ export class Vault {
     lines.push(`  source: ${tx.source}`);
 
     if (caller || this.ctx.connection.hasSigner()) {
-      const affordances = await this.affordances(txHash, caller);
+      // Reuse the record already fetched above rather than reading it a second time.
+      const affordances = await this.resolveAffordances(tx.hash, tx, caller);
       const allowed = affordances.filter((a) => a.allowed).map((a) => a.action);
       lines.push(`  you can: ${allowed.length > 0 ? allowed.join(', ') : 'nothing right now'}`);
     }

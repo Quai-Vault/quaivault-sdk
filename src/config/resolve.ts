@@ -229,7 +229,9 @@ export function resolveConfig(options: ClientOptions = {}): ResolvedConfig {
     contracts,
     indexer,
     rpcUrl,
-    privateKey: pick(options.privateKey, env[ENV_VARS.privateKey]),
+    // An explicit signer wins outright in `Connection`, so resolving a key here would
+    // only pull a secret into memory that nothing can use. Skip it.
+    privateKey: options.signer ? undefined : pick(options.privateKey, env[ENV_VARS.privateKey]),
     consistency,
     maxIndexerLagBlocks:
       options.maxIndexerLagBlocks ?? parseLag(env[ENV_VARS.maxIndexerLagBlocks]) ?? 50,

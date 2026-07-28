@@ -3,9 +3,12 @@ import { assertQuaiAddress } from './address.js';
 import type { Connection } from './chain/connection.js';
 import { normalizeTxHash } from './chain/connection.js';
 import { RecoveryContract, type RawRecovery } from './chain/recovery-contract.js';
+import { VaultContract } from './chain/vault-contract.js';
+import { MAX_OWNERS, SENTINEL_MODULES, ZERO_ADDRESS } from './encode/index.js';
 import type { IndexerQueries } from './indexer/queries.js';
 import { decodeRevertFromError } from './errors/decode.js';
 import {
+  NoIndexerError,
   NotFoundError,
   PreconditionError,
   RevertError,
@@ -21,10 +24,6 @@ import type {
   RecoveryConfig,
   RecoveryRequest,
 } from './types.js';
-
-/** Sentinel head of the module linked list — never valid as an owner. */
-const SENTINEL = '0x0000000000000000000000000000000000000001';
-const ZERO = '0x0000000000000000000000000000000000000000';
 
 export interface RecoveryModuleContext {
   connection: Connection;
@@ -63,6 +62,17 @@ export class RecoveryModule {
     return this.ctx.vaultAddress;
   }
 
+  /**
+   * The vault this module acts on, through the same retrying facade every other vault
+   * read in the SDK uses. Recovery reaches into the vault for three checks — is the
+   * module enabled, is the caller an owner, who are the current owners — and each of
+   * them gates a write, so none of them should be the one read that silently skips
+   * transient-failure handling.
+   */
+  private vaultContract(): VaultContract {
+    return new VaultContract(this.ctx.connection.vault(this.vault), this.ctx.connection.retry);
+  }
+
   // =========================================================================
   // Reads
   // =========================================================================
@@ -70,8 +80,7 @@ export class RecoveryModule {
   /** Whether the module is currently enabled on the vault. */
   async isEnabled(): Promise<boolean> {
     if (!this.ctx.moduleAddress) return false;
-    const vault = this.ctx.connection.vault(this.vault);
-    return vault.getFunction('isModuleEnabled(address)')(this.address) as Promise<boolean>;
+    return this.vaultContract().isModuleEnabled(this.address);
   }
 
   async config(): Promise<RecoveryConfig> {
@@ -137,8 +146,12 @@ export class RecoveryModule {
    * Indexer-only — the chain retains no record of cancelled recoveries.
    */
   async history(options: { limit?: number; offset?: number } = {}): Promise<RecoveryRequest[]> {
+    // Throws rather than returning `[]`, matching every other indexer-only read on the
+    // SDK. An empty array here is indistinguishable from "this vault has no recovery
+    // history", which is exactly the wrong thing to tell someone whose vault is being
+    // recovered out from under them.
     const queries = this.ctx.queries;
-    if (!queries) return [];
+    if (!queries) throw new NoIndexerError('Listing recovery history');
 
     const rows = await queries.recoveryHistory(this.vault, options);
     return rows.map((row) => ({
@@ -306,15 +319,14 @@ export class RecoveryModule {
 
     // S-1: new owners are added before old ones are removed, so a fully disjoint
     // replacement can transiently exceed MAX_OWNERS and revert.
-    const vault = this.ctx.connection.vault(this.vault);
-    const currentOwners = (await vault.getFunction('getOwners()')()) as string[];
+    const currentOwners = await this.vaultContract().getOwners();
     const current = new Set(Array.from(currentOwners).map((o) => String(o).toLowerCase()));
     const overlap = request.newOwners.filter((o) => current.has(o.toLowerCase())).length;
     const peak = current.size + request.newOwners.length - overlap;
-    if (peak > 20) {
+    if (peak > MAX_OWNERS) {
       throw new PreconditionError(
-        `Executing this recovery would transiently hold ${peak} owners, above the 20-owner maximum ` +
-          '— new owners are added before old ones are removed.',
+        `Executing this recovery would transiently hold ${peak} owners, above the ` +
+          `${MAX_OWNERS}-owner maximum — new owners are added before old ones are removed.`,
         {
           remediation:
             'Run a recovery that retains at least one existing owner, then a second recovery to ' +
@@ -334,8 +346,7 @@ export class RecoveryModule {
     const hash = normalizeTxHash(recoveryHash, 'recovery hash');
     const caller = await this.ctx.connection.address();
 
-    const vault = this.ctx.connection.vault(this.vault);
-    const isOwner = (await vault.getFunction('isOwner(address)')(caller)) as boolean;
+    const isOwner = await this.vaultContract().isOwner(caller);
     if (!isOwner) {
       throw new PreconditionError(
         `Only a current owner of the vault can cancel a recovery. ${caller} is not one.`,
@@ -371,7 +382,7 @@ export class RecoveryModule {
       this.isGuardian(address),
       this.contract().recoveryApprovals(this.vault, hash, address),
       this.isEnabled(),
-      this.ctx.connection.vault(this.vault).getFunction('isOwner(address)')(address) as Promise<boolean>,
+      this.vaultContract().isOwner(address),
     ]);
 
     const now = nowSeconds();
@@ -520,7 +531,7 @@ export class RecoveryModule {
     const seen = new Set<string>();
     for (const owner of newOwners) {
       const key = owner.toLowerCase();
-      if (key === ZERO || key === SENTINEL) {
+      if (key === ZERO_ADDRESS || key === SENTINEL_MODULES) {
         throw new ValidationError(
           `New owner ${owner} is reserved — the zero address and the module sentinel 0x…01 are rejected.`,
         );

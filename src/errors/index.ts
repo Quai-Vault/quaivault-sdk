@@ -2,6 +2,7 @@ import type { DecodedRevert } from '../types.js';
 
 /** Machine-readable error codes. Stable across releases. */
 export type QuaiVaultErrorCode =
+  | 'ABORTED'
   | 'CONFIG'
   | 'NOT_CONNECTED'
   | 'NO_SIGNER'
@@ -46,6 +47,21 @@ export class QuaiVaultError extends Error {
       remediation: this.remediation,
       retryableAt: this.retryableAt,
     };
+  }
+}
+
+/**
+ * A caller-supplied `AbortSignal` fired.
+ *
+ * Every long-running operation the SDK exposes — retries, indexer polling, salt
+ * mining, waiting for a timelock — accepts a signal, and each used to report abort
+ * differently: a bare `Error('Aborted')` in two places, a `PreconditionError` in a
+ * third. Consumers switching on `err.code` to distinguish "the user pressed Ctrl-C"
+ * from "this genuinely failed" could not do so. They can now.
+ */
+export class AbortError extends QuaiVaultError {
+  constructor(operation = 'The operation') {
+    super('ABORTED', `${operation} was aborted.`);
   }
 }
 

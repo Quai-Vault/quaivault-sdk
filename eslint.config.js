@@ -38,6 +38,16 @@ export default tseslint.config(
     rules: { 'no-console': 'off' },
   },
   {
-    ignores: ['dist/**', 'node_modules/**', 'test/**', '*.config.ts'],
+    // Tests assert on shapes the type system cannot see and reach into internals on
+    // purpose, so the two rules that exist to keep `src/` honest would only generate
+    // noise here. Everything else — unused vars, `no-eval`, `prefer-const` — still applies.
+    files: ['test/**'],
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-non-null-assertion': 'off',
+    },
+  },
+  {
+    ignores: ['dist/**', 'node_modules/**', '*.config.ts'],
   },
 );

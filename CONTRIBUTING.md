@@ -40,6 +40,13 @@ publishes through trusted publishing (OIDC — no token). Bump the version and u
 - **Addresses entering a role or receiving value go through `assertQuaiAddress`.** Removal
   paths deliberately stay permissive.
 - **No `console` in `src/`.** A library should return or throw, not print. Lint enforces it.
+- **`quais` is pinned exactly, not ranged.** It is pre-1.0 and every release is an alpha, so
+  a caret or tilde would let an unreviewed breaking change into a published SDK on any fresh
+  install. Bump the pin deliberately, with the suite as the gate — do not "fix" it to a range.
+- **Attacker-controlled strings go through `sanitizeText` before they land in a
+  human-facing field.** Token `symbol`/`name` and revert reasons are chosen by whoever
+  deployed the contract; consumers render them in terminals. Machine-readable fields
+  (`DecodedRevert.args`) keep the raw bytes. See `src/text.ts`.
 
 ## Tests
 

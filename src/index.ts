@@ -12,7 +12,8 @@
 
 // --- client
 export { QuaiVault, QuaiVaultClient, connect } from './client.js';
-export { Vault, type VaultContext } from './vault.js';
+export { Vault, type VaultContext, type VaultView } from './vault.js';
+export { mapPooled, DEFAULT_CONCURRENCY } from './pool.js';
 export { Factory, type CreateProgress, type FactoryContext } from './factory.js';
 export { RecoveryModule, type RecoveryModuleContext } from './recovery.js';
 export {
@@ -24,6 +25,7 @@ export {
 export { Connection } from './chain/connection.js';
 export { withRetry, isTransient, type RetryOptions } from './chain/retry.js';
 export { VaultContract, FactoryContract, type RawTransactionStruct } from './chain/vault-contract.js';
+export { TokenContract } from './chain/token-contract.js';
 export {
   RecoveryContract,
   type RawRecovery,
@@ -59,6 +61,7 @@ export {
   MAX_MODULES,
   MAX_OWNERS,
   SENTINEL_MODULES,
+  ZERO_ADDRESS,
   type BatchCall,
 } from './encode/index.js';
 export {
@@ -96,8 +99,10 @@ export {
   defaultStrategy,
   syncStrategy,
   workerThreadsStrategy,
+  createWorkerThreadsStrategy,
   type MineSaltOptions,
   type MiningStrategy,
+  type WorkerRuntime,
 } from './salt/mine.js';
 export {
   predictVaultAddress,
@@ -106,6 +111,9 @@ export {
   computeFullSalt,
   shardPrefixOf,
 } from './salt/predict.js';
+
+// --- display sanitisation
+export { sanitizeText, DEFAULT_TEXT_LIMIT } from './text.js';
 
 // --- address validation
 export {
@@ -120,6 +128,7 @@ export {
 // --- errors
 export {
   QuaiVaultError,
+  AbortError,
   ConfigError,
   NoSignerError,
   NoIndexerError,

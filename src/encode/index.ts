@@ -1,4 +1,4 @@
-import { AbiCoder, Interface, concat, getBytes, solidityPacked, zeroPadValue, toBeHex } from 'quais';
+import { AbiCoder, Interface, concat, getBytes, solidityPacked } from 'quais';
 import {
   Erc1155Abi,
   Erc20Abi,
@@ -24,8 +24,10 @@ export const interfaces = { vault, recovery, multiSend, erc20, erc721, erc1155 }
 export const MAX_EXECUTION_DELAY = 30 * 24 * 60 * 60;
 export const MAX_OWNERS = 20;
 export const MAX_MODULES = 50;
-/** Head of the Zodiac module linked list. */
+/** Head of the Zodiac module linked list. Never valid as an owner, module or guardian. */
 export const SENTINEL_MODULES = '0x0000000000000000000000000000000000000001';
+/** Rejected everywhere an address is committed to a role. */
+export const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
 // ---------------------------------------------------------------------------
 // Vault self-calls
@@ -222,5 +224,3 @@ export function minimumExpiration(
 ): number {
   return at + effectiveDelaySeconds + marginSeconds;
 }
-
-export { zeroPadValue, toBeHex };

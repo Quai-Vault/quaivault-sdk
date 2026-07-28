@@ -1,4 +1,7 @@
 import type { Provider, Signer } from 'quais';
+// Type-only, and `verbatimModuleSyntax` erases it, so the cycle with config/networks.ts
+// exists in the type graph and never in the emitted module graph.
+import type { NetworkName } from './config/networks.js';
 
 export type Address = string;
 export type Hex = string;
@@ -58,7 +61,7 @@ export interface NetworkConfig {
 export type Consistency = 'auto' | 'indexed' | 'chain';
 
 export interface ClientOptions {
-  network?: NetworkConfig | keyof typeof import('./config/networks.js').networks;
+  network?: NetworkConfig | NetworkName;
   provider?: Provider;
   signer?: Signer;
   /** Private key for a local signer. Prefer the `QUAIVAULT_PRIVATE_KEY` env var. */
@@ -151,8 +154,16 @@ export interface VaultTransaction {
   data: Hex;
 
   proposer: Address;
-  /** Unix seconds when the proposal was recorded on chain. */
+  /**
+   * Unix seconds when the proposal was recorded on chain, or 0 when unknown.
+   *
+   * Only chain reads carry a timestamp: the vault stores one in the transaction
+   * struct, but the indexer records the *block* instead. On an indexed read this is 0
+   * and {@link proposedAtBlock} carries the position. Never render 0 as a date.
+   */
   proposedAt: number;
+  /** Block the proposal was recorded in. Only populated on indexer reads. */
+  proposedAtBlock?: number;
 
   kind: TransactionKind;
   decoded?: DecodedCall;
@@ -368,8 +379,10 @@ export interface RecoveryRequest {
   expiration: number;
   status: RecoveryStatus;
   executed: boolean;
-  /** Guardians who have approved. Only populated on indexer reads. */
-  approvedBy?: Address[];
+  /**
+   * Who initiated the recovery. Only populated on indexer reads — the module's struct
+   * does not retain it.
+   */
   initiator?: Address;
   source: 'indexer' | 'chain';
 }
@@ -410,7 +423,15 @@ export interface Pagination {
 
 export interface Page<T> {
   data: T[];
+  /**
+   * Approximate size of the full result set.
+   *
+   * Taken from the query planner rather than a full scan, so it is exact on small
+   * tables and an estimate on large ones. Use it to size a progress bar, not to decide
+   * whether to keep paging — {@link hasMore} is what answers that.
+   */
   total: number;
+  /** Whether another page exists. Always exact. */
   hasMore: boolean;
 }
 

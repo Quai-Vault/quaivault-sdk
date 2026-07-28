@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { isTransient, withRetry } from '../src/chain/retry.js';
+import { AbortError } from '../src/errors/index.js';
 
 describe('isTransient', () => {
   it('treats network, server and timeout codes as transient', () => {
@@ -139,5 +140,29 @@ describe('withRetry', () => {
     const fn = vi.fn().mockResolvedValue('ok');
     await expect(withRetry(fn, { signal: controller.signal })).rejects.toThrow(/abort/i);
     expect(fn).not.toHaveBeenCalled();
+  });
+
+  // A consumer distinguishing "the user pressed Ctrl-C" from "this genuinely failed"
+  // switches on `code`, so abort must not surface as a bare Error from either the
+  // pre-flight check or the backoff sleep.
+  it('reports abort as a typed AbortError from the pre-flight check', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(withRetry(async () => 'ok', { signal: controller.signal })).rejects.toMatchObject({
+      name: 'AbortError',
+      code: 'ABORTED',
+    });
+  });
+
+  it('reports abort as a typed AbortError from the backoff sleep', async () => {
+    const controller = new AbortController();
+    const fn = vi.fn().mockRejectedValue({ code: 'TIMEOUT' });
+    const promise = withRetry(fn, { maxAttempts: 5, baseDelayMs: 50, signal: controller.signal });
+    controller.abort();
+    await expect(promise).rejects.toMatchObject({ name: 'AbortError', code: 'ABORTED' });
+  });
+
+  it('does not treat an abort as transient', () => {
+    expect(isTransient(new AbortError('Something'))).toBe(false);
   });
 });

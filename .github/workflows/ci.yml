@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 22 is the floor `engines` declares, and the floor @supabase/supabase-js
+        # 22 is the floor `engines` declares, and the floor @supabase/realtime-js
         # requires — it needs a global WebSocket, which Node 20 lacks. Testing the
         # floor as well as current catches a version-only break before release.
         node: [22, 24]

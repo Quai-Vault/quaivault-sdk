@@ -5,7 +5,13 @@ import type { Connection } from './chain/connection.js';
 import { FactoryContract } from './chain/vault-contract.js';
 import { PreconditionError, RevertError, ValidationError } from './errors/index.js';
 import { decodeRevertFromError } from './errors/decode.js';
-import { MAX_EXECUTION_DELAY, MAX_OWNERS } from './encode/index.js';
+import {
+  MAX_EXECUTION_DELAY,
+  MAX_MODULES,
+  MAX_OWNERS,
+  SENTINEL_MODULES,
+  ZERO_ADDRESS,
+} from './encode/index.js';
 import type { ReceiptLike } from './lifecycle/outcome.js';
 import { mineSalt, type MineSaltOptions, type MiningStrategy } from './salt/mine.js';
 import { predictVaultAddress } from './salt/predict.js';
@@ -274,8 +280,7 @@ function validateCreateParams(params: CreateVaultParams): void {
     // only guards the zero address, the vault itself and the module sentinel.
     assertQuaiAddress(owner, `owner[${i}]`);
     const key = owner.toLowerCase();
-    if (key === '0x0000000000000000000000000000000000000000' ||
-        key === '0x0000000000000000000000000000000000000001') {
+    if (key === ZERO_ADDRESS || key === SENTINEL_MODULES) {
       throw new ValidationError(
         `Owner ${owner} is reserved — the zero address and the module sentinel 0x…01 are rejected.`,
       );
@@ -285,6 +290,11 @@ function validateCreateParams(params: CreateVaultParams): void {
   });
 
   if (params.initialModules?.length) {
+    if (params.initialModules.length > MAX_MODULES) {
+      throw new ValidationError(
+        `A vault may have at most ${MAX_MODULES} modules (got ${params.initialModules.length}).`,
+      );
+    }
     assertQuaiAddresses(params.initialModules, 'initialModules');
   }
   if (params.initialDelegatecallTargets?.length) {

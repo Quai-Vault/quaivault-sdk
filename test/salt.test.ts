@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 import { describe, expect, it } from 'vitest';
 import { isQuaiAddress } from 'quais';
 import {
@@ -6,9 +7,15 @@ import {
   predictVaultAddress,
   shardPrefixOf,
 } from '../src/salt/predict.js';
-import { mineSalt, syncStrategy } from '../src/salt/mine.js';
+import {
+  createWorkerThreadsStrategy,
+  mineSalt,
+  syncStrategy,
+  workerThreadsStrategy,
+  type WorkerRuntime,
+} from '../src/salt/mine.js';
 import { mainnet } from '../src/config/networks.js';
-import { SaltMiningError, ValidationError } from '../src/errors/index.js';
+import { AbortError, SaltMiningError, ValidationError } from '../src/errors/index.js';
 
 const FACTORY = mainnet.contracts.factory;
 const IMPL = mainnet.contracts.implementation;
@@ -164,6 +171,78 @@ describe('mineSalt', () => {
         },
         syncStrategy,
       ),
-    ).rejects.toThrow(/aborted/i);
+    ).rejects.toThrow(AbortError);
   });
+});
+
+describe('workerThreadsStrategy', () => {
+  const params = {
+    factory: FACTORY,
+    implementation: IMPL,
+    deployer: DEPLOYER,
+    params: { owners: [A], threshold: 1 },
+    timeoutMs: 20_000,
+  };
+
+  it('mines a salt whose predicted address is on the deployer shard', async () => {
+    const mined = await mineSalt(params, workerThreadsStrategy);
+    expect(mined.predictedAddress.toLowerCase().startsWith(shardPrefixOf(DEPLOYER))).toBe(true);
+    expect(isQuaiAddress(mined.predictedAddress)).toBe(true);
+    // The salt must reproduce the address off-chain, or it is useless to a caller
+    // who mines now and deploys later.
+    expect(
+      predictVaultAddress({
+        factory: FACTORY,
+        implementation: IMPL,
+        deployer: DEPLOYER,
+        salt: mined.salt,
+        params: params.params,
+      }),
+    ).toBe(mined.predictedAddress);
+  }, 30_000);
+
+  it('retreats to the sync miner when a worker dies on startup', async () => {
+    // What a bundled consumer actually gets: the inlined worker source resolves
+    // `quais` with a bare require that no bundler traces, so the worker throws on its
+    // first line. Mining is pure computation over random salts, so falling back is
+    // always safe — and deployment getting slower beats deployment becoming impossible.
+    let spawned = 0;
+    class DeadWorker extends EventEmitter {
+      constructor() {
+        super();
+        spawned++;
+        queueMicrotask(() => this.emit('error', new Error("Cannot find module 'quais'")));
+      }
+      terminate(): Promise<number> {
+        return Promise.resolve(0);
+      }
+    }
+
+    const strategy = createWorkerThreadsStrategy(async () => ({
+      Worker: DeadWorker as unknown as WorkerRuntime['Worker'],
+      parallelism: 4,
+    }));
+
+    const mined = await mineSalt(params, strategy);
+    expect(spawned).toBeGreaterThan(0);
+    expect(isQuaiAddress(mined.predictedAddress)).toBe(true);
+    expect(mined.predictedAddress.toLowerCase().startsWith(shardPrefixOf(DEPLOYER))).toBe(true);
+  }, 30_000);
+
+  it('retreats to the sync miner when the runtime has no workers at all', async () => {
+    const strategy = createWorkerThreadsStrategy(async () => null);
+    const mined = await mineSalt(params, strategy);
+    expect(isQuaiAddress(mined.predictedAddress)).toBe(true);
+  }, 30_000);
+
+  it('propagates a real mining outcome instead of retrying it single-threaded', async () => {
+    // Exhaustion is an answer about the job, not about the environment. Falling back
+    // here would double the wall-clock cost to reach the same verdict.
+    await expect(
+      mineSalt(
+        { ...params, targetPrefix: '0x00dead', maxAttempts: 300, timeoutMs: 20_000 },
+        workerThreadsStrategy,
+      ),
+    ).rejects.toThrow(SaltMiningError);
+  }, 30_000);
 });

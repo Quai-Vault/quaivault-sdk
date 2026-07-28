@@ -6,10 +6,21 @@ import {
   SocialRecoveryModuleAbi,
   QuaiVaultProxyAbi,
 } from '../abi/index.js';
+import { sanitizeText } from '../text.js';
 import type { DecodedRevert, Hex } from '../types.js';
 
 const SOLIDITY_ERROR_SELECTOR = '0x08c379a0'; // Error(string)
 const SOLIDITY_PANIC_SELECTOR = '0x4e487b71'; // Panic(uint256)
+
+/**
+ * Cap for revert text rendered into {@link DecodedRevert.message}.
+ *
+ * Revert data comes from whatever contract the vault called, which for an external
+ * call is an address the proposer chose — so it is as untrusted as token metadata and
+ * gets the same treatment. `args` keeps the raw values; only `message` is scrubbed,
+ * because that is the field meant for a human.
+ */
+const REVERT_TEXT_LIMIT = 256;
 
 interface ErrorEntry {
   fragment: ErrorFragment;
@@ -134,7 +145,14 @@ function formatArgs(fragment: ErrorFragment, args: readonly unknown[]): string {
   if (args.length === 0) return '';
   const parts = fragment.inputs.map((input, i) => {
     const value = args[i];
-    const rendered = typeof value === 'bigint' ? value.toString() : String(value);
+    // A custom error may declare a `string` parameter, which puts contract-supplied
+    // text into this rendering. Scrub it like any other display string.
+    const rendered =
+      typeof value === 'bigint'
+        ? value.toString()
+        : typeof value === 'string'
+          ? sanitizeText(value, REVERT_TEXT_LIMIT)
+          : String(value);
     return input.name ? `${input.name}: ${rendered}` : rendered;
   });
   return `(${parts.join(', ')})`;
@@ -157,7 +175,7 @@ export function decodeRevert(data: unknown): DecodedRevert | undefined {
         name: 'Error',
         args: [reason],
         selector,
-        message: String(reason),
+        message: sanitizeText(reason, REVERT_TEXT_LIMIT),
       };
     } catch {
       return undefined;

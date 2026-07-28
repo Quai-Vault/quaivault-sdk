@@ -1,4 +1,4 @@
-import type { RealtimeChannel } from '@supabase/supabase-js';
+import type { RealtimeChannel } from '@supabase/realtime-js';
 import { isAddress } from 'quais';
 import type { IndexerClient } from './client.js';
 import { ValidationError } from '../errors/index.js';
@@ -79,7 +79,7 @@ export function watchVault(
 
   // Channel names must be unique per client; include the vault so two handles on
   // different vaults do not collide.
-  const channel: RealtimeChannel = client.raw.channel(`quaivault:${schema}:${address}`);
+  const channel: RealtimeChannel = client.channel(`quaivault:${schema}:${address}`);
 
   for (const topic of topics) {
     const table = TABLE_FOR[topic];
@@ -116,7 +116,7 @@ export function watchVault(
   return {
     topics,
     async unsubscribe() {
-      await client.raw.removeChannel(channel);
+      await client.removeChannel(channel);
     },
   };
 }
