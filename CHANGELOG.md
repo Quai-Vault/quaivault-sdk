@@ -8,6 +8,8 @@ version is `0.x`, minor bumps may contain breaking changes.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-07-28
+
 A full-surface review for security, stability, efficiency, scalability and succinctness.
 See [`docs/sdk-review-2026-07.md`](docs/sdk-review-2026-07.md) for the findings and the
 reasoning behind each fix.
