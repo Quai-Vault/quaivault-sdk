@@ -8,9 +8,15 @@ version is `0.x`, minor bumps may contain breaking changes.
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-07-29
+
 Caller-supplied ABIs for `decodeCall`, so proposals targeting contracts the SDK does not
-ship get a real description instead of a bare selector. Reasoning, and why network
-resolution was left out, in [`docs/design-abi-resolution.md`](docs/design-abi-resolution.md).
+ship get a real description instead of a bare selector.
+
+> **Design note:** [`docs/design-abi-resolution.md`](docs/design-abi-resolution.md) covers
+> why the ABI is a security boundary in a multisig, why supplied ABIs are address-keyed and
+> ordered behind the built-ins, and why network resolution was left out — including
+> measurements against the Quai IPFS gateways.
 
 ### Added
 

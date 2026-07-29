@@ -365,8 +365,10 @@ change how a vault self-call or a known module call is read. `DecodedCall.select
 surfaced so a reviewer can check the claimed function against an independent source — the
 only defence against a colliding selector, which the SDK cannot detect on its own.
 
-The SDK does not fetch ABIs. See [`docs/design-abi-resolution.md`](./docs/design-abi-resolution.md)
-for why, including measurements against the Quai IPFS gateways.
+The SDK does not fetch ABIs. See the
+[ABI resolution design note](https://github.com/Quai-Vault/quaivault-sdk/blob/main/docs/design-abi-resolution.md)
+for why — including measurements against the Quai IPFS gateways, one of which does not
+exist and the other of which resolves some contracts and hangs on others.
 
 ## Clock skew
 
