@@ -8,6 +8,38 @@ version is `0.x`, minor bumps may contain breaking changes.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-07-29
+
+### Changed
+
+- **`AbiSource` gains `heuristic`**, and four decodes move from `builtin` to it: the
+  ERC20, ERC721 and ERC1155 selector blocks, and `module_execution`.
+
+  `abiSource` is named for where the ABI came from, but what it measures is **how the ABI
+  was bound to this address** — the part that can be wrong. Both the vault ABI and the
+  ERC20 fragments ship with the SDK, so by provenance alone both were `builtin`; yet one is
+  matched because the target *is* the vault, and the other because four bytes of calldata
+  looked familiar. An ERC20-shaped call to an address with no code at all was reported as
+  `builtin` — indistinguishable from a vault self-call, in the pre-approval summary that
+  0.4.0's whole design exists to protect.
+
+  `module_execution` had the same flaw and is fixed with them: it parses the vault ABI
+  against any target, so its identification is a guess too.
+
+  Breaking for anyone switching exhaustively on `abiSource`, or treating `builtin` as
+  "verified". Summaries are unchanged and are deliberately not hedged for `heuristic` — an
+  ordinary token transfer is the common case, and phrasing every one as uncertain would
+  make the hedge worthless by repetition. The field carries the uncertainty instead.
+
+  Reported by the CLI team against 0.4.0. See
+  [`docs/design-abi-resolution.md`](docs/design-abi-resolution.md).
+
+### Note
+
+`bytecode` and `explorer` members are **not** added ahead of the resolver that would
+produce them. An unreachable union member forces consumers to handle a case that cannot
+occur, and a `switch` arm nobody can exercise is a place for wrong code to hide.
+
 ## [0.4.0] — 2026-07-29
 
 Caller-supplied ABIs for `decodeCall`, so proposals targeting contracts the SDK does not
