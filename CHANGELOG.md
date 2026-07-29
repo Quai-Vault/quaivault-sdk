@@ -8,6 +8,20 @@ version is `0.x`, minor bumps may contain breaking changes.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-07-29
+
+**No functional change over `0.2.1`.** The code is byte-for-byte identical; only the version
+differs.
+
+`0.2.1` was cut as a patch, but it added public API surface — `ClientOptions.now`, the
+`Clock` type, `QuaiVaultClient.now`, `Vault.hasApproved()`, and an `at?` parameter on both
+`affordances()` methods. Under semver that is a minor. Nothing in `0.2.1` is unsafe to
+upgrade into and its changelog describes it accurately, but a patch version understates what
+arrived, and anyone pinning with `~0.2.1` would not receive it as an addition.
+
+This release exists to put the correct signal on that surface. `0.2.1` remains published and
+working; there is nothing to migrate. Read the `0.2.1` entry below for what actually changed.
+
 ## [0.2.1] — 2026-07-28
 
 Answers the CLI team's [clock-offset request](docs/request-clock-offset.md); the reasoning,

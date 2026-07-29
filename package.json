@@ -1,6 +1,6 @@
 {
   "name": "@quaivault/sdk",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "TypeScript SDK for QuaiVault multisig vaults on Quai Network",
   "license": "MIT",
   "author": "QuaiVault",
