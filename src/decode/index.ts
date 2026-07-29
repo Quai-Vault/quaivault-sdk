@@ -1,6 +1,14 @@
-import { formatQuai, getBytes } from 'quais';
+import { Interface, formatQuai, getBytes } from 'quais';
 import { interfaces } from '../encode/index.js';
-import type { Address, DecodedCall, Hex, TransactionKind } from '../types.js';
+import type {
+  AbiLookup,
+  AbiSource,
+  Address,
+  DecodedCall,
+  Hex,
+  TransactionKind,
+} from '../types.js';
+import type { InterfaceAbi } from 'quais';
 
 export interface DecodeContext {
   /** The vault the transaction belongs to — used to detect self-calls. */
@@ -11,12 +19,22 @@ export interface DecodeContext {
   /** Known module addresses, for classifying `module_config` calls. */
   socialRecovery?: Address;
   multiSendCallOnly?: Address;
+  /**
+   * ABIs for contracts the SDK does not ship, keyed by address. See {@link AbiLookup}.
+   *
+   * Consulted only after every built-in match has failed, and only for the exact `to`
+   * address — so a supplied ABI can add detail the SDK lacks but can never override how
+   * a vault self-call or a known module call is read.
+   */
+  abis?: AbiLookup;
 }
 
 export interface DecodeResult {
   kind: TransactionKind;
   decoded?: DecodedCall;
   summary: string;
+  /** Provenance of the ABI behind this result. See {@link AbiSource}. */
+  abiSource: AbiSource;
 }
 
 const SELF_CALL_ADMIN = new Set([
@@ -76,6 +94,8 @@ export function decodeCall(ctx: DecodeContext): DecodeResult {
     return {
       kind: 'transfer',
       summary: `Transfer ${formatQuai(value)} QUAI to ${short(to)}`,
+      // No ABI involved — a bare value transfer is fully described by its own fields.
+      abiSource: 'builtin',
     };
   }
 
@@ -88,6 +108,7 @@ export function decodeCall(ctx: DecodeContext): DecodeResult {
         signature: parsed.signature,
         args: parsed.args,
         target: 'vault',
+        selector: parsed.selector,
       };
       if (MESSAGE_SIGNING.has(parsed.name)) {
         return {
@@ -97,12 +118,23 @@ export function decodeCall(ctx: DecodeContext): DecodeResult {
             parsed.name === 'signMessage'
               ? 'Sign a message on behalf of the vault (EIP-1271)'
               : 'Revoke a previously signed message (EIP-1271)',
+          abiSource: 'builtin',
         };
       }
       if (SELF_CALL_ADMIN.has(parsed.name)) {
-        return { kind: 'wallet_admin', decoded, summary: describeAdmin(parsed.name, parsed.args) };
+        return {
+          kind: 'wallet_admin',
+          decoded,
+          summary: describeAdmin(parsed.name, parsed.args),
+          abiSource: 'builtin',
+        };
       }
-      return { kind: 'wallet_admin', decoded, summary: `Vault self-call: ${parsed.name}` };
+      return {
+        kind: 'wallet_admin',
+        decoded,
+        summary: `Vault self-call: ${parsed.name}`,
+        abiSource: 'builtin',
+      };
     }
   }
 
@@ -120,9 +152,15 @@ export function decodeCall(ctx: DecodeContext): DecodeResult {
           summary: `Configure social recovery: ${guardians?.length ?? '?'} guardians, ${String(
             threshold ?? '?',
           )} required`,
+          abiSource: 'builtin',
         };
       }
-      return { kind: 'module_config', decoded, summary: `Social recovery: ${parsed.name}` };
+      return {
+        kind: 'module_config',
+        decoded,
+        summary: `Social recovery: ${parsed.name}`,
+        abiSource: 'builtin',
+      };
     }
   }
 
@@ -135,6 +173,7 @@ export function decodeCall(ctx: DecodeContext): DecodeResult {
         kind: 'batched_call',
         decoded: { ...parsed, target: 'multiSend' },
         summary: `Batched call: ${inner.length} sub-transaction${inner.length === 1 ? '' : 's'}`,
+        abiSource: 'builtin',
       };
     }
   }
@@ -146,7 +185,32 @@ export function decodeCall(ctx: DecodeContext): DecodeResult {
       kind: 'module_execution',
       decoded: { ...asVault, target: 'vault' },
       summary: `Module execution against ${short(String(asVault.args.to ?? to))}`,
+      abiSource: 'builtin',
     };
+  }
+
+  // --- caller-supplied ABI for this exact address
+  //
+  // Placed ahead of the token heuristics below because it is better evidence. Those
+  // heuristics identify a call by selector shape alone and will happily read any
+  // contract exposing `transfer(address,uint256)` as an ERC20. A caller who has told us
+  // *which contract this address is* has said something the selector cannot.
+  //
+  // Still behind the built-ins: a supplied ABI must never change how a vault self-call
+  // or a known module call is read.
+  const supplied = toInterface(lookup(ctx.abis, to));
+  if (supplied) {
+    const parsed = tryParse(supplied, data);
+    if (parsed) {
+      return {
+        kind: 'external_call',
+        decoded: { ...parsed, target: 'external' },
+        summary:
+          `Call ${parsed.name} on ${short(to)}` +
+          (value > 0n ? ` with ${formatQuai(value)} QUAI` : ''),
+        abiSource: 'supplied',
+      };
+    }
   }
 
   // --- token standards
@@ -156,6 +220,7 @@ export function decodeCall(ctx: DecodeContext): DecodeResult {
       kind: 'erc20_transfer',
       decoded: { ...erc20, target: 'erc20' },
       summary: describeErc20(erc20.name, erc20.args, to),
+      abiSource: 'builtin',
     };
   }
 
@@ -168,6 +233,7 @@ export function decodeCall(ctx: DecodeContext): DecodeResult {
         erc1155.name === 'safeBatchTransferFrom'
           ? `Transfer a batch of ERC1155 tokens from ${short(to)}`
           : `Transfer ERC1155 token #${String(erc1155.args.id ?? '?')} from ${short(to)}`,
+      abiSource: 'builtin',
     };
   }
 
@@ -179,6 +245,7 @@ export function decodeCall(ctx: DecodeContext): DecodeResult {
       summary: `Transfer NFT #${String(erc721.args.tokenId ?? '?')} to ${short(
         String(erc721.args.to ?? '?'),
       )}`,
+      abiSource: 'builtin',
     };
   }
 
@@ -188,13 +255,16 @@ export function decodeCall(ctx: DecodeContext): DecodeResult {
     summary:
       `Call ${short(to)} (selector ${selector})` +
       (value > 0n ? ` with ${formatQuai(value)} QUAI` : ''),
+    // Nothing matched. Saying so beats guessing: an honest "unknown" is a weaker claim
+    // than a wrong one, and a reviewer can act on the difference.
+    abiSource: 'none',
   };
 }
 
 function tryParse(
-  iface: (typeof interfaces)[keyof typeof interfaces],
+  iface: Interface,
   data: Hex,
-): { name: string; signature: string; args: Record<string, unknown> } | null {
+): { name: string; signature: string; args: Record<string, unknown>; selector: Hex } | null {
   try {
     const parsed = iface.parseTransaction({ data });
     if (!parsed) return null;
@@ -202,6 +272,9 @@ function tryParse(
       name: parsed.name,
       signature: parsed.fragment.format('sighash'),
       args: namedArgs(parsed.fragment.inputs, parsed.args),
+      // Taken from the calldata rather than the fragment: it is what was actually
+      // called, which is the thing a reviewer needs to check independently.
+      selector: data.slice(0, 10) as Hex,
     };
   } catch {
     return null;
@@ -296,4 +369,61 @@ function hexOf(bytes: Uint8Array): string {
   let s = '0x';
   for (const b of bytes) s += b.toString(16).padStart(2, '0');
   return s;
+}
+
+/**
+ * Call a caller-supplied lookup without letting it break the decode.
+ *
+ * `decodeCall` is pure, total and runs once per row across a whole history page. The
+ * lookup is the one part of it written by someone else, so a resolver that throws —
+ * a registry built from malformed input, a Proxy with an opinion — must cost that row
+ * its detail and nothing more.
+ */
+function lookup(
+  abis: AbiLookup | undefined,
+  address: Address,
+): InterfaceAbi | Interface | undefined {
+  if (!abis) return undefined;
+  try {
+    return abis(address);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Accept either a raw ABI or an already-built `Interface`.
+ *
+ * A malformed ABI yields `undefined` rather than throwing, for the same reason.
+ */
+function toInterface(abi: InterfaceAbi | Interface | undefined): Interface | undefined {
+  if (!abi) return undefined;
+  if (abi instanceof Interface) return abi;
+  try {
+    return new Interface(abi);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Build an {@link AbiLookup} from an address-keyed set of ABIs.
+ *
+ * Keys are matched case-insensitively, so a checksummed address and a lowercased one
+ * both find the same entry — worth having, because addresses arrive checksummed from
+ * `getAddress` and lowercased from the indexer, and a silent miss here reads as "the
+ * SDK could not decode this" rather than "your key was the wrong case".
+ *
+ * ```ts
+ * const qv = connect({
+ *   abis: abiRegistry({ '0x0033…': myTokenAbi }),
+ * });
+ * ```
+ */
+export function abiRegistry(entries: Record<string, InterfaceAbi | Interface>): AbiLookup {
+  const byAddress = new Map<string, InterfaceAbi | Interface>();
+  for (const [address, abi] of Object.entries(entries)) {
+    byAddress.set(address.toLowerCase(), abi);
+  }
+  return (address) => byAddress.get(address.toLowerCase());
 }

@@ -67,6 +67,7 @@ export {
 export {
   decodeCall,
   decodeMultiSendPayload,
+  abiRegistry,
   type DecodeContext,
   type DecodeResult,
   type DecodedBatchCall,

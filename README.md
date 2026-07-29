@@ -337,6 +337,37 @@ nonce and funds errors are permanent by definition, and anything unrecognised is
 permanent too — so a genuine bug surfaces immediately instead of hiding behind three slow
 attempts. Rate limits, 5xx and raw transport failures are retried.
 
+## Describing calls to contracts the SDK doesn't know
+
+`decodeCall` ships ABIs for the vault, factory, recovery module, MultiSend and the token
+standards. Anything else renders honestly but bluntly:
+
+```
+Call 0x0033…3333 (selector 0xa9059cbb)
+```
+
+Supply an ABI and it gets described instead:
+
+```ts
+const qv = connect({
+  network: 'mainnet',
+  abis: abiRegistry({ '0x0033…': stakingAbi }),
+});
+```
+
+Every decode carries `abiSource` — `builtin`, `supplied`, or `none` — and it is a required
+field, not an optional one. In a multisig the summary is what owners read before approving,
+so "we decoded this" and "we decoded this using an ABI someone handed us" must not render
+identically.
+
+Supplied ABIs are address-keyed, consulted only after every built-in match, and cannot
+change how a vault self-call or a known module call is read. `DecodedCall.selector` is
+surfaced so a reviewer can check the claimed function against an independent source — the
+only defence against a colliding selector, which the SDK cannot detect on its own.
+
+The SDK does not fetch ABIs. See [`docs/design-abi-resolution.md`](./docs/design-abi-resolution.md)
+for why, including measurements against the Quai IPFS gateways.
+
 ## Clock skew
 
 The contracts decide with `block.timestamp`. Everything the SDK derives locally — a

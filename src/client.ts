@@ -8,6 +8,7 @@ import { IndexerQueries } from './indexer/queries.js';
 import { NoIndexerError } from './errors/index.js';
 import { Vault, type VaultContext } from './vault.js';
 import type {
+  AbiLookup,
   Address,
   ClientOptions,
   Clock,
@@ -29,6 +30,11 @@ export class QuaiVaultClient {
    */
   readonly now: Clock;
   /**
+   * ABIs for contracts the SDK does not ship, used to describe proposals targeting
+   * them. See {@link AbiLookup}.
+   */
+  readonly abis: AbiLookup | undefined;
+  /**
    * Resolved configuration, with the private key stripped and the indexer key
    * masked — safe to log. The key itself is consumed once when building the signer.
    */
@@ -43,6 +49,7 @@ export class QuaiVaultClient {
     const resolved: ResolvedConfig = resolveConfig(options);
     this.config = redactConfig(resolved);
     this.now = resolved.now;
+    this.abis = options.abis;
     this.connection = new Connection(resolved, {
       ...(options.provider ? { provider: options.provider } : {}),
       ...(options.signer ? { signer: options.signer } : {}),
@@ -89,6 +96,7 @@ export class QuaiVaultClient {
       consistency: this.config.consistency,
       maxIndexerLagBlocks: this.config.maxIndexerLagBlocks,
       now: this.now,
+      ...(this.abis ? { abis: this.abis } : {}),
     };
   }
 

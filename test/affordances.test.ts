@@ -19,6 +19,7 @@ function tx(overrides: Partial<VaultTransaction> = {}): VaultTransaction {
     proposedAt: NOW - 1000,
     kind: 'transfer',
     summary: 'Transfer',
+    abiSource: 'builtin',
     status: 'pending',
     approvals: [],
     approvalCount: 0,

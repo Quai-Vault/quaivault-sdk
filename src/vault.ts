@@ -36,6 +36,7 @@ import { computeAffordances } from './lifecycle/affordances.js';
 import { classifyExecution, extractProposedTxHash, type ReceiptLike } from './lifecycle/outcome.js';
 import { deriveStatus, executableAfterOf, nowSeconds } from './lifecycle/status.js';
 import type {
+  AbiLookup,
   Address,
   Affordance,
   ApprovalRecord,
@@ -66,6 +67,8 @@ export interface VaultContext {
    * Optional so a hand-built context still works; defaults to the local clock.
    */
   now?: Clock;
+  /** ABIs for contracts the SDK does not ship. See {@link AbiLookup}. */
+  abis?: AbiLookup;
   /** Set by {@link Vault.pinned}. Never consulted by a write precondition. */
   view?: VaultView;
 }
@@ -557,6 +560,7 @@ export class Vault {
       data,
       socialRecovery: this.ctx.contracts.socialRecovery,
       multiSendCallOnly: this.ctx.contracts.multiSendCallOnly,
+      ...(this.ctx.abis ? { abis: this.ctx.abis } : {}),
     });
 
     const expiration = toNumber(row.expiration);
@@ -591,6 +595,7 @@ export class Vault {
       kind: decodeResult.kind,
       decoded: decodeResult.decoded,
       summary: decodeResult.summary,
+      abiSource: decodeResult.abiSource,
       status,
       approvals,
       approvalCount,
@@ -644,6 +649,7 @@ export class Vault {
       data,
       socialRecovery: this.ctx.contracts.socialRecovery,
       multiSendCallOnly: this.ctx.contracts.multiSendCallOnly,
+      ...(this.ctx.abis ? { abis: this.ctx.abis } : {}),
     });
 
     return {
@@ -657,6 +663,7 @@ export class Vault {
       kind: decodeResult.kind,
       decoded: decodeResult.decoded,
       summary: decodeResult.summary,
+      abiSource: decodeResult.abiSource,
       status: deriveStatus({
         executed,
         cancelled,
@@ -1073,6 +1080,7 @@ export class Vault {
         data,
         socialRecovery: this.ctx.contracts.socialRecovery,
         multiSendCallOnly: this.ctx.contracts.multiSendCallOnly,
+        ...(this.ctx.abis ? { abis: this.ctx.abis } : {}),
       });
       return {
         dryRun: true,

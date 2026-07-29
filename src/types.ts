@@ -1,4 +1,4 @@
-import type { Provider, Signer } from 'quais';
+import type { Interface, InterfaceAbi, Provider, Signer } from 'quais';
 // Type-only, and `verbatimModuleSyntax` erases it, so the cycle with config/networks.ts
 // exists in the type graph and never in the emitted module graph.
 import type { NetworkName } from './config/networks.js';
@@ -109,6 +109,11 @@ export interface ClientOptions {
    */
   now?: Clock;
   /**
+   * ABIs for contracts the SDK does not ship, so proposals targeting them get a real
+   * description instead of a bare selector. See {@link AbiLookup}.
+   */
+  abis?: AbiLookup;
+  /**
    * Retry policy for transient RPC and indexer failures. Applies to reads only —
    * writes are never retried, since a resubmit risks a double broadcast.
    */
@@ -171,13 +176,54 @@ export interface ApprovalRecord {
   active: boolean;
 }
 
+/**
+ * Where the ABI behind a decode came from.
+ *
+ * Load-bearing, not decorative. In a multisig the summary is what owners read before
+ * approving, so "we decoded this" and "we decoded this using an ABI a stranger gave us"
+ * are different claims and must not render identically. Present on every
+ * {@link DecodeResult}, including the ones that decoded nothing.
+ *
+ * - `builtin`  — an ABI the SDK ships: the vault, factory, recovery module, MultiSend,
+ *                or the ERC20/721/1155 fragments. As trustworthy as the SDK itself.
+ * - `supplied` — an ABI the caller provided for this address. Trust is theirs to
+ *                establish; the SDK does not and cannot verify it corresponds to the
+ *                deployed code.
+ * - `none`     — nothing matched. Only the 4-byte selector is known, and the summary
+ *                says exactly that rather than guessing.
+ */
+export type AbiSource = 'builtin' | 'supplied' | 'none';
+
+/**
+ * Supplies the ABI for a contract the SDK does not ship, keyed by address.
+ *
+ * Address-keyed rather than a list to try, deliberately. Attempting a pile of ABIs
+ * against arbitrary calldata until one parses is how a call gets confidently decoded as
+ * the wrong thing — a 4-byte selector collides far too easily to treat a successful
+ * parse as identification. Binding each ABI to the address it belongs to keeps a
+ * successful decode meaningful.
+ *
+ * Synchronous on purpose. `decodeCall` is pure and runs per row across a whole page of
+ * history; a lookup that could touch the network would put an unbounded fetch in that
+ * loop. Resolve ahead of time and hand the results in.
+ */
+export type AbiLookup = (address: Address) => InterfaceAbi | Interface | undefined;
+
 export interface DecodedCall {
   /** Function name, e.g. `addOwner`. */
   name: string;
   signature: string;
   args: Record<string, unknown>;
   /** Contract the selector was resolved against. */
-  target: 'vault' | 'socialRecovery' | 'multiSend' | 'erc20' | 'erc721' | 'erc1155';
+  target: 'vault' | 'socialRecovery' | 'multiSend' | 'erc20' | 'erc721' | 'erc1155' | 'external';
+  /**
+   * The call's 4-byte selector.
+   *
+   * Surfaced so a reviewer can check the claimed function against an independent
+   * source. That is the only defence against a colliding selector in a supplied ABI,
+   * which the SDK cannot detect on its own.
+   */
+  selector: Hex;
 }
 
 export interface VaultTransaction {
@@ -203,6 +249,8 @@ export interface VaultTransaction {
   decoded?: DecodedCall;
   /** One-line human-readable description. */
   summary: string;
+  /** Provenance of the ABI behind {@link summary} and {@link decoded}. */
+  abiSource: AbiSource;
 
   status: TransactionStatus;
   approvals: ApprovalRecord[];

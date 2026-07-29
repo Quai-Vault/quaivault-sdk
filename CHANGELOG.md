@@ -8,6 +8,40 @@ version is `0.x`, minor bumps may contain breaking changes.
 
 ## [Unreleased]
 
+Caller-supplied ABIs for `decodeCall`, so proposals targeting contracts the SDK does not
+ship get a real description instead of a bare selector. Reasoning, and why network
+resolution was left out, in [`docs/design-abi-resolution.md`](docs/design-abi-resolution.md).
+
+### Added
+
+- **`ClientOptions.abis`** and **`DecodeContext.abis`** — an `AbiLookup`, keyed by address.
+  Address-keyed rather than a list to try: attempting a pile of ABIs against arbitrary
+  calldata until one parses is how a call gets confidently decoded as the wrong thing.
+  Synchronous, because `decodeCall` is pure and runs per row across a whole history page.
+- **`abiRegistry(entries)`** — builds a lookup from an address-keyed object, matching
+  case-insensitively.
+- **`DecodedCall.selector`** — the call's 4 bytes, surfaced so a reviewer can check the
+  claimed function against a source other than the one making the claim. That is the only
+  defence against a colliding selector in a supplied ABI, which the SDK cannot detect.
+- **`AbiSource`** and **`AbiLookup`** types.
+
+### Changed
+
+- **`DecodeResult` and `VaultTransaction` carry `abiSource`** — `builtin`, `supplied` or
+  `none`. Required, not optional: in a multisig the summary is what owners read before
+  approving, so a decode backed by an ABI a stranger supplied must not render identically
+  to one the SDK vouches for.
+
+  Supplied ABIs are consulted after every built-in match — they cannot change how a vault
+  self-call or a known module call is read — and before the token selector heuristics,
+  which identify a call by selector shape alone and will read anything exposing
+  `transfer(address,uint256)` as an ERC20.
+
+  Technically breaking for anyone *constructing* a `DecodeResult` or `VaultTransaction`;
+  purely additive for anyone reading one.
+- A malformed ABI, or a lookup that throws, degrades that row to `abiSource: 'none'` rather
+  than failing the surrounding page.
+
 ## [0.3.0] — 2026-07-29
 
 **No functional change over `0.2.1`.** The code is byte-for-byte identical; only the version
