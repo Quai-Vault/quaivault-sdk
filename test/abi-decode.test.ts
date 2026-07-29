@@ -7,6 +7,7 @@ import { mainnet } from '../src/config/networks.js';
 const VAULT = '0x00112233445566778899aabbccddeeff00112233';
 const STAKING = '0x0033333333333333333333333333333333333333';
 const ALICE = '0x00aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+const ZERO = '0x0000000000000000000000000000000000000000';
 
 /** A contract the SDK knows nothing about. */
 const STAKING_ABI = [
@@ -53,6 +54,86 @@ describe('abiSource provenance', () => {
     expect(result.decoded?.target).toBe('external');
     expect(result.decoded?.args.amount).toBe(500n);
     expect(result.summary).toContain('stake');
+  });
+});
+
+describe('selector-matched decodes are heuristic, not builtin', () => {
+  // The distinction `abiSource` actually draws is not where the ABI came from — the
+  // ERC20 fragments and the vault ABI both ship with the SDK — but how it was bound to
+  // this address. A self-call is matched because the target *is* the vault. A token
+  // transfer is matched because four bytes looked familiar.
+
+  it('reads ERC20 calldata against an unknown address as heuristic', () => {
+    const result = decodeCall(ctx({ data: tokenCalls.erc20Transfer(ALICE, 0n) }));
+    expect(result.kind).toBe('erc20_transfer');
+    expect(result.abiSource).toBe('heuristic');
+  });
+
+  it('does the same for ERC721 and ERC1155', () => {
+    const erc721 = decodeCall(ctx({ data: tokenCalls.erc721Transfer(VAULT, ALICE, 1n) }));
+    expect(erc721.kind).toBe('erc721_transfer');
+    expect(erc721.abiSource).toBe('heuristic');
+
+    const erc1155 = decodeCall(ctx({ data: tokenCalls.erc1155Transfer(VAULT, ALICE, 1n, 1n) }));
+    expect(erc1155.kind).toBe('erc1155_transfer');
+    expect(erc1155.abiSource).toBe('heuristic');
+  });
+
+  it('reads a module execution against an arbitrary target as heuristic', () => {
+    // Parsed from the vault ABI but aimed at any address, so the identification is a
+    // guess exactly like the token blocks. This one was missed in the original report.
+    const data = new Interface([
+      'function execTransactionFromModule(address to, uint256 value, bytes data, uint8 operation) returns (bool)',
+    ]).encodeFunctionData('execTransactionFromModule', [STAKING, 0n, '0x', 0]);
+
+    const result = decodeCall(ctx({ data }));
+    expect(result.kind).toBe('module_execution');
+    expect(result.abiSource).toBe('heuristic');
+  });
+
+  it('keeps address-matched decodes at builtin', () => {
+    // The contrast that gives `heuristic` its meaning: these three are matched because
+    // the SDK knows which contract the address is, not because the calldata parsed.
+    expect(decodeCall(ctx({ to: VAULT, data: selfCall.addOwner(ALICE) })).abiSource).toBe(
+      'builtin',
+    );
+    expect(decodeCall(ctx({ data: '0x', value: 1n })).abiSource).toBe('builtin');
+
+    const module = mainnet.contracts.socialRecovery!;
+    const setup = new Interface([
+      'function setupRecovery(address wallet, address[] guardians, uint256 threshold, uint256 recoveryPeriod)',
+    ]).encodeFunctionData('setupRecovery', [VAULT, [ALICE], 1, 86_400]);
+    expect(decodeCall(ctx({ to: module, data: setup })).abiSource).toBe('builtin');
+  });
+
+  it('separates all four levels for the same kind of question', () => {
+    const levels = {
+      builtin: decodeCall(ctx({ to: VAULT, data: selfCall.addOwner(ALICE) })).abiSource,
+      heuristic: decodeCall(ctx({ data: tokenCalls.erc20Transfer(ALICE, 0n) })).abiSource,
+      supplied: decodeCall(
+        ctx({
+          data: stakingIface.encodeFunctionData('withdraw', [1n]),
+          abis: abiRegistry({ [STAKING]: STAKING_ABI }),
+        }),
+      ).abiSource,
+      none: decodeCall(ctx({ data: stakingIface.encodeFunctionData('withdraw', [1n]) }))
+        .abiSource,
+    };
+    expect(levels).toEqual({
+      builtin: 'builtin',
+      heuristic: 'heuristic',
+      supplied: 'supplied',
+      none: 'none',
+    });
+  });
+
+  it('an address with no code still decodes as a token, but says it is guessing', () => {
+    // The reported case. The summary reads confidently because an ordinary ERC20
+    // transfer is the common case and hedging every one would make the hedge worthless
+    // — so `abiSource` is what carries the uncertainty.
+    const result = decodeCall(ctx({ data: tokenCalls.erc20Transfer(ZERO, 0n) }));
+    expect(result.summary).toMatch(/Transfer 0 units of token/);
+    expect(result.abiSource).toBe('heuristic');
   });
 });
 

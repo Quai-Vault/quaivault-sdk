@@ -52,10 +52,30 @@ trust levels into one call is a bigger risk than any individual source.
 Pure, synchronous, no dependency, no network, no trust decision made on the caller's
 behalf.
 
-**`AbiSource` on every `DecodeResult`, required.** `builtin` (an ABI the SDK ships, or a
-bare value transfer needing none), `supplied` (the caller provided it), `none` (nothing
-matched — only the selector is known). A UI cannot render a summary without having the
-provenance in hand, because it is not an optional field.
+**`AbiSource` on every `DecodeResult`, required.** A UI cannot render a summary without
+having the provenance in hand, because it is not an optional field.
+
+The field is named for where the ABI came from, but what it measures is **how the ABI was
+bound to this address** — which is the part that can be wrong. Both the vault ABI and the
+ERC20 fragments ship with the SDK, so by provenance alone both would be `builtin`; yet one
+is matched because the target *is* the vault, and the other because four bytes of calldata
+looked familiar.
+
+| Level | Bound how | Example |
+|---|---|---|
+| `builtin` | The SDK knows which contract this address is | vault self-call, configured recovery module, configured MultiSend, bare value transfer |
+| `heuristic` | Selector shape alone, against an unknown address | `transfer(address,uint256)` read as ERC20; `execTransactionFromModule` against any target |
+| `supplied` | The caller said so | `connect({ abis })` |
+| `none` | Nothing matched | raw selector only |
+
+`heuristic` was added in 0.5.0 after the CLI team found that an ERC20-shaped call to an
+address with *no code at all* returned `builtin` — labelled identically to a vault
+self-call. Their report named the three token blocks; `module_execution` had the same
+flaw and was found while verifying it, since it parses the vault ABI against any target.
+
+Summaries are not hedged for `heuristic`, deliberately. An ordinary ERC20 transfer is the
+overwhelmingly common case, and phrasing every one of them as uncertain would make the
+hedge worthless by repetition. The field carries the uncertainty instead.
 
 **`AbiLookup`, address-keyed and synchronous.** Keyed by address rather than a list to try,
 deliberately: attempting a pile of ABIs against arbitrary calldata until one parses is how
@@ -144,4 +164,10 @@ Sketch, for whoever picks it up:
 
 The trust gradient must survive that layer: a `bytecode`-sourced ABI and an `explorer`-
 sourced one should not collapse into the same `supplied` once they reach `decodeCall`.
-That likely means widening `AbiSource` rather than reusing `supplied` for both.
+That means widening `AbiSource` again — to something like
+`'builtin' | 'heuristic' | 'supplied' | 'bytecode' | 'explorer' | 'none'`.
+
+Those two members are deliberately **not** added ahead of the resolver. An unreachable
+union member forces every consumer to handle a case that cannot occur, and a `switch` arm
+nobody can exercise is a place for wrong code to hide. Add them with the code that
+produces them.

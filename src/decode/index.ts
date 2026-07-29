@@ -179,13 +179,19 @@ export function decodeCall(ctx: DecodeContext): DecodeResult {
   }
 
   // --- module execution via Zodiac
+  //
+  // `heuristic` from here down: everything below matches on selector shape alone,
+  // against an address the SDK has no independent knowledge of. The ABIs are ours, but
+  // the *identification* is a four-byte guess — this parses `execTransactionFromModule`
+  // against any target, and the token blocks read anything exposing
+  // `transfer(address,uint256)` as an ERC20, including an address with no code at all.
   const asVault = tryParse(interfaces.vault, data);
   if (asVault?.name.startsWith('execTransactionFromModule')) {
     return {
       kind: 'module_execution',
       decoded: { ...asVault, target: 'vault' },
       summary: `Module execution against ${short(String(asVault.args.to ?? to))}`,
-      abiSource: 'builtin',
+      abiSource: 'heuristic',
     };
   }
 
@@ -213,14 +219,14 @@ export function decodeCall(ctx: DecodeContext): DecodeResult {
     }
   }
 
-  // --- token standards
+  // --- token standards (selector-matched — see the note above)
   const erc20 = tryParse(interfaces.erc20, data);
   if (erc20 && ['transfer', 'approve', 'transferFrom'].includes(erc20.name)) {
     return {
       kind: 'erc20_transfer',
       decoded: { ...erc20, target: 'erc20' },
       summary: describeErc20(erc20.name, erc20.args, to),
-      abiSource: 'builtin',
+      abiSource: 'heuristic',
     };
   }
 
@@ -233,7 +239,7 @@ export function decodeCall(ctx: DecodeContext): DecodeResult {
         erc1155.name === 'safeBatchTransferFrom'
           ? `Transfer a batch of ERC1155 tokens from ${short(to)}`
           : `Transfer ERC1155 token #${String(erc1155.args.id ?? '?')} from ${short(to)}`,
-      abiSource: 'builtin',
+      abiSource: 'heuristic',
     };
   }
 
@@ -245,7 +251,7 @@ export function decodeCall(ctx: DecodeContext): DecodeResult {
       summary: `Transfer NFT #${String(erc721.args.tokenId ?? '?')} to ${short(
         String(erc721.args.to ?? '?'),
       )}`,
-      abiSource: 'builtin',
+      abiSource: 'heuristic',
     };
   }
 

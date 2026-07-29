@@ -355,10 +355,19 @@ const qv = connect({
 });
 ```
 
-Every decode carries `abiSource` — `builtin`, `supplied`, or `none` — and it is a required
-field, not an optional one. In a multisig the summary is what owners read before approving,
-so "we decoded this" and "we decoded this using an ABI someone handed us" must not render
-identically.
+Every decode carries `abiSource`, and it is a required field, not an optional one. In a
+multisig the summary is what owners read before approving, so decodes of different strength
+must not render identically:
+
+| | Bound how |
+|---|---|
+| `builtin` | The SDK knows which contract this address is — a vault self-call, the configured recovery module, a bare value transfer |
+| `heuristic` | Selector shape alone, against an address the SDK knows nothing about. `transfer(address,uint256)` reads as an ERC20 transfer whether the target is a token or has no code at all |
+| `supplied` | You said so, via `abis` |
+| `none` | Nothing matched — only the raw selector |
+
+Summaries are not hedged for `heuristic`: an ordinary token transfer is the common case, and
+phrasing every one as uncertain would make the warning worthless. The field is the mechanism.
 
 Supplied ABIs are address-keyed, consulted only after every built-in match, and cannot
 change how a vault self-call or a known module call is read. `DecodedCall.selector` is

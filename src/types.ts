@@ -177,22 +177,38 @@ export interface ApprovalRecord {
 }
 
 /**
- * Where the ABI behind a decode came from.
+ * How strongly the SDK can vouch for a decode.
+ *
+ * Named for where the ABI came from, but what it actually measures is **how the ABI was
+ * bound to this address** — which is the part that can be wrong. Both the vault ABI and
+ * the ERC20 fragments ship with the SDK, so by provenance alone both would be `builtin`;
+ * yet one is matched because the target *is* the vault, and the other because four bytes
+ * of calldata looked familiar. Those are not the same claim.
  *
  * Load-bearing, not decorative. In a multisig the summary is what owners read before
- * approving, so "we decoded this" and "we decoded this using an ABI a stranger gave us"
- * are different claims and must not render identically. Present on every
- * {@link DecodeResult}, including the ones that decoded nothing.
+ * approving, so decodes of different strength must not render identically. Present on
+ * every {@link DecodeResult}, including the ones that decoded nothing.
  *
- * - `builtin`  — an ABI the SDK ships: the vault, factory, recovery module, MultiSend,
- *                or the ERC20/721/1155 fragments. As trustworthy as the SDK itself.
- * - `supplied` — an ABI the caller provided for this address. Trust is theirs to
- *                establish; the SDK does not and cannot verify it corresponds to the
- *                deployed code.
- * - `none`     — nothing matched. Only the 4-byte selector is known, and the summary
- *                says exactly that rather than guessing.
+ * - `builtin`   — an ABI the SDK ships, matched because the SDK knows *which contract
+ *                 this address is*: a vault self-call, the configured recovery module,
+ *                 the configured MultiSend. Also a bare value transfer, which needs no
+ *                 ABI at all. As trustworthy as the SDK itself.
+ * - `heuristic` — an ABI the SDK ships, matched on selector shape alone against an
+ *                 address it knows nothing about. `transfer(address,uint256)` is read as
+ *                 an ERC20 transfer whether the target is a token, an unrelated contract
+ *                 that happens to expose that signature, or an address with no code.
+ *                 Usually right, never verified.
+ * - `supplied`  — an ABI the caller provided for this address. Trust is theirs to
+ *                 establish; the SDK does not and cannot verify it corresponds to the
+ *                 deployed code.
+ * - `none`      — nothing matched. Only the 4-byte selector is known, and the summary
+ *                 says exactly that rather than guessing.
+ *
+ * Summaries are not hedged for `heuristic`, deliberately: an ordinary ERC20 transfer is
+ * the overwhelmingly common case, and phrasing every one of them as uncertain would make
+ * the warning worthless by repetition. This field is the mechanism instead.
  */
-export type AbiSource = 'builtin' | 'supplied' | 'none';
+export type AbiSource = 'builtin' | 'heuristic' | 'supplied' | 'none';
 
 /**
  * Supplies the ABI for a contract the SDK does not ship, keyed by address.
