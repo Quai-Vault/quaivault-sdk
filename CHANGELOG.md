@@ -8,6 +8,38 @@ version is `0.x`, minor bumps may contain breaking changes.
 
 ## [Unreleased]
 
+### Changed
+
+- **`@supabase/postgrest-js` and `@supabase/realtime-js` pinned exactly**, `^2.110.9` →
+  `2.111.0`, matching the treatment `quais` already gets.
+
+  A published tarball ships no lockfile, so the SDK's lockfile governed its own CI and
+  nothing else: CI validated 2.110.9 while consumers resolved 2.111.0, and that gap reopened
+  with every upstream publish — 12 stable releases per package per month. A consumer *can*
+  close it with root-level `overrides`, but `npm install -g` and `npx` have no manifest to
+  put them in, which is precisely how a CLI is distributed.
+
+  Bumped rather than frozen at the previously-locked version, because a deliberate pin is
+  only meaningful if the pinned version is one somebody reviewed. 2.111.0 was verified
+  against the live mainnet indexer — authenticated PostgREST read, paged select, and a
+  realtime channel reaching `SUBSCRIBED` — since the hand-rolled auth wiring fails at
+  runtime rather than compile time.
+
+  Requested by the CLI team; see
+  [`docs/response-dependency-pinning.md`](docs/response-dependency-pinning.md), which also
+  records the three corrections to the request and the duplicate-install cost that pinning
+  carries.
+
+- `zod` deliberately left on `^3.25.76`. The 3.x line has had zero releases in 30 days, so
+  the range admits nothing.
+
+### Added
+
+- **`.github/dependabot.yml`** — weekly version-update PRs for the three pinned
+  dependencies, with the two Supabase packages grouped since they release in lockstep.
+  Pinning inverts the failure mode: without a standing reminder, "pinned" becomes "stuck on
+  a known-vulnerable version".
+
 ## [0.5.0] — 2026-07-29
 
 ### Changed

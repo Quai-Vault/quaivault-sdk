@@ -1,0 +1,45 @@
+# Dependabot exists here to discharge the obligation that pinning creates.
+#
+# `quais` and the two Supabase transport packages are pinned exactly, so nothing upstream
+# reaches a consumer until a maintainer acts. That is the point — an unreviewed transport
+# update on a signing path is the worse risk — but it inverts the failure mode: without a
+# standing reminder, "pinned" decays into "stuck on a known-vulnerable version". This
+# config is what keeps the pin honest.
+#
+# Dependabot rather than Renovate purely because it needs no app install: a file in the
+# repo is the whole setup, so it cannot silently fail to be enabled.
+#
+# Note: security *alerts* are a repository setting and cover every dependency regardless
+# of what is listed here. This file governs version-update pull requests.
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: '/'
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    commit-message:
+      prefix: deps
+
+    # Only the pinned dependencies. Everything else — devDependencies, zod — carries a
+    # range and updates itself on the next install, so a PR for it is pure noise.
+    allow:
+      - dependency-name: '@supabase/postgrest-js'
+      - dependency-name: '@supabase/realtime-js'
+      - dependency-name: 'quais'
+
+    # postgrest-js and realtime-js release in lockstep — both walked 2.109 → 2.110 → 2.111
+    # over the same month — so separate PRs would conflict with each other and neither
+    # would be mergeable alone. One PR, both packages.
+    groups:
+      supabase-transport:
+        patterns:
+          - '@supabase/*'
+
+    # `quais` is itself a prerelease (1.0.0-alpha.x), which means Dependabot will offer
+    # alpha bumps. That is wanted: an alpha bump is exactly the change that needs a human
+    # looking at it, and the test suite is the gate.
+    versioning-strategy: increase

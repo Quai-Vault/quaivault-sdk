@@ -40,9 +40,15 @@ publishes through trusted publishing (OIDC — no token). Bump the version and u
 - **Addresses entering a role or receiving value go through `assertQuaiAddress`.** Removal
   paths deliberately stay permissive.
 - **No `console` in `src/`.** A library should return or throw, not print. Lint enforces it.
-- **`quais` is pinned exactly, not ranged.** It is pre-1.0 and every release is an alpha, so
-  a caret or tilde would let an unreviewed breaking change into a published SDK on any fresh
-  install. Bump the pin deliberately, with the suite as the gate — do not "fix" it to a range.
+- **`quais` and the Supabase transport packages are pinned exactly, not ranged.** A
+  published tarball ships no lockfile, so a range means the version CI validated is not the
+  version consumers install — and `npm install -g` gives them no way to override it. Bump
+  the pins deliberately, with the suite as the gate; `.github/dependabot.yml` raises the PRs.
+  Do not "fix" these to ranges.
+- **A Supabase bump needs a live check, not just the suite.** The PostgREST wiring is
+  hand-rolled (`/rest/v1`, `apikey` + `Authorization: Bearer`) because the SDK depends on the
+  subpackages rather than the umbrella. Break it and nothing fails until a real request is
+  made against a real indexer.
 - **Attacker-controlled strings go through `sanitizeText` before they land in a
   human-facing field.** Token `symbol`/`name` and revert reasons are chosen by whoever
   deployed the contract; consumers render them in terminals. Machine-readable fields
