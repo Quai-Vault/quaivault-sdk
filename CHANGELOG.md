@@ -8,6 +8,48 @@ version is `0.x`, minor bumps may contain breaking changes.
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-07-30
+
+### Breaking
+
+- **`quais` moved from `dependencies` to `peerDependencies`**, as an allowlist of tested
+  versions: `"1.0.0-alpha.55 || 1.0.0-alpha.56"`. Consumers must now install it themselves
+  (`npm install @quaivault/sdk quais`), though npm 7+ auto-installs peers so most will not
+  notice.
+
+  This reverses the decision recorded in `docs/PLAN.md` ("`quais` is a direct dependency,
+  not a peer"), for two reasons that were measured rather than assumed:
+
+  1. **The API hands you quais objects.** `Provider`, `Signer` and `InterfaceAbi` cross the
+     boundary in both directions, so the consumer and the SDK have to be holding the same
+     object graph.
+  2. **A pinned normal dependency cannot deduplicate.** With `quais` exact under
+     `dependencies`, a consumer on a different version got two copies — verified: their
+     `alpha.55` at top level and the SDK's `alpha.56` nested, roughly 200 KB gzip
+     duplicated. That dwarfs the 34 KB saved in 0.2.0 by dropping the Supabase umbrella,
+     and `quaivault-frontend` and `quaivault-indexer` both already declare
+     `^1.0.0-alpha.53`, so it would have landed the moment either adopted the SDK.
+
+  An allowlist rather than a range because `quais` is pre-1.0 with no compatibility
+  promise. Four shapes were tested against a lagging consumer: an exact `dependencies` pin
+  duplicated; a permissive peer range deduplicated but let `npm install -g` resolve an
+  unreviewed version, reintroducing the exposure 0.5.1 had just closed; an exact peer
+  failed to install at all with `ERESOLVE`. The allowlist deduplicates, keeps `-g` on a
+  tested version, and refuses anything unlisted loudly instead of accepting it silently.
+
+### Changed
+
+- **`quais` bumped to `1.0.0-alpha.56`** (released 2026-07-29). Verified beyond the suite:
+  live chain read, salt mining, and CREATE2 address prediction still matching its recorded
+  expectation — that last one is pure quais crypto and a silent change there would alter
+  deployment addresses without failing a test.
+
+### Added
+
+- **`peer-range` CI job** — runs typecheck, the suite and the build against every version
+  in the allowlist, and asserts the matrix covers the declared range. The allowlist is a
+  claim about what is tested; this is what makes the claim true and keeps it true.
+
 ## [0.5.1] — 2026-07-30
 
 Dependency hygiene only. No API change, no behaviour change — but the resolved dependency

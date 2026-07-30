@@ -30,6 +30,46 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  peer-range:
+    name: Suite passes on every allowlisted quais (${{ matrix.quais }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Must match `peerDependencies.quais` in package.json exactly. That range is a
+        # claim about which versions are tested, and a claim nothing exercises is a guess
+        # — this job is what makes it true. Widening the peer range without adding the
+        # version here is the failure mode to avoid.
+        quais: ['1.0.0-alpha.55', '1.0.0-alpha.56']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Assert the matrix covers the declared peer range
+        run: |
+          RANGE=$(node -p "require('./package.json').peerDependencies.quais")
+          echo "declared: $RANGE"
+          case "$RANGE" in
+            *"${{ matrix.quais }}"*) ;;
+            *) echo "::error::${{ matrix.quais }} is not in the declared peer range ($RANGE)"; exit 1 ;;
+          esac
+
+      - name: Install the peer version under test
+        run: npm install --no-save quais@${{ matrix.quais }}
+
+        # Read the manifest as a file, not as a bare specifier: quais' `exports` map does
+        # not expose ./package.json, so `require('quais/package.json')` throws
+        # ERR_PACKAGE_PATH_NOT_EXPORTED and would fail this step rather than report.
+      - run: node -p "JSON.parse(require('fs').readFileSync('node_modules/quais/package.json','utf8')).version"
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
   package:
     name: Packaged tarball installs and imports
     runs-on: ubuntu-latest

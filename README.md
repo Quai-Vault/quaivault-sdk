@@ -6,8 +6,26 @@ Reads go through the indexer when it is fresh and the chain when it is not; writ
 re-validate on chain before signing. Works in Node and the browser, with any signer.
 
 ```bash
-npm install @quaivault/sdk
+npm install @quaivault/sdk quais
 ```
+
+`quais` is a **peer dependency**, and the supported versions are listed explicitly rather
+than as a range:
+
+```json
+"peerDependencies": { "quais": "1.0.0-alpha.55 || 1.0.0-alpha.56" }
+```
+
+Two reasons it is a peer rather than a normal dependency. The SDK's public API hands you
+quais types — `Provider`, `Signer`, `InterfaceAbi` — so you and it must be holding the same
+object graph. And a pinned normal dependency cannot deduplicate: an app that also uses quais
+directly would ship two copies, roughly 200 KB gzip of avoidable weight in a browser bundle.
+
+The allowlist is not a range that happens to look odd. It names the versions CI actually runs
+the suite against, so an unlisted version is refused at install time rather than accepted and
+hoped for. `quais` is pre-1.0 and every release is an alpha; there is no compatibility promise
+to lean on. If you need a version that is not listed, open an issue — adding one is a test run,
+not a negotiation.
 
 **Documentation:** [quaivault.org/docs/sdk](https://quaivault.org/docs/sdk) —
 [guides](https://quaivault.org/docs/sdk-guides) ·

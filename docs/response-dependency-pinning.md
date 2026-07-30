@@ -114,9 +114,26 @@ for the types to line up. That is the textbook signal for a `peerDependency`, an
 guarantee a single copy rather than the duplication measured above. npm 7+ auto-installs
 peers, so zero-config install mostly survives.
 
-Not done here because it is a breaking change and it contradicts an explicit decision in
-`PLAN.md` ("`quais` is a direct dependency, not a peer"). Reversing that deserves its own
-discussion rather than being smuggled into a dependency-pinning commit.
+**Resolved in 0.6.0**, after testing four shapes against a consumer pinned to `alpha.55`
+while the SDK was on `alpha.56`:
+
+| Shape | Result |
+|---|---|
+| exact `dependencies` (0.5.1) | installs, **2 copies** — theirs and ours |
+| peer, permissive range | installs, **1 copy**, SDK works on the older version |
+| peer, exact version | **ERESOLVE — install fails outright** |
+| peer, allowlist of tested versions | installs, **1 copy**, unlisted versions refused |
+
+The permissive range looked best until it was tested under the CLI's own distribution
+model: `npm install -g` auto-resolves a peer to the newest in range, unreviewed, which
+reintroduces exactly the exposure this document argued for closing. The allowlist keeps a
+global install on a tested version while still deduplicating.
+
+Its cost is honest and worth stating: a consumer who upgrades `quais` before the SDK does
+gets `ERESOLVE` and has to wait, or pass `--legacy-peer-deps`. That is the same maintenance
+obligation the pin created, and it is carried by the same Dependabot config — with one
+caveat recorded there, that Dependabot tracks the `devDependencies` pin and will not widen
+an `a || b` allowlist, so extending it is deliberate human work backed by a CI assertion.
 
 ## On the process
 

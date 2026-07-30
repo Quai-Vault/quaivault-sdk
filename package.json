@@ -1,6 +1,6 @@
 {
   "name": "@quaivault/sdk",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "TypeScript SDK for QuaiVault multisig vaults on Quai Network",
   "license": "MIT",
   "author": "QuaiVault",
@@ -60,13 +60,16 @@
   "dependencies": {
     "@supabase/postgrest-js": "2.111.0",
     "@supabase/realtime-js": "2.111.0",
-    "quais": "1.0.0-alpha.55",
     "zod": "^3.25.76"
+  },
+  "peerDependencies": {
+    "quais": "1.0.0-alpha.55 || 1.0.0-alpha.56"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
     "@types/node": "^22.18.0",
     "eslint": "^9.39.5",
+    "quais": "1.0.0-alpha.56",
     "tsup": "^8.5.0",
     "tsx": "^4.20.0",
     "typescript": "^5.9.0",

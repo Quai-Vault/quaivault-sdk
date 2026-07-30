@@ -39,7 +39,14 @@ updates:
         patterns:
           - '@supabase/*'
 
-    # `quais` is itself a prerelease (1.0.0-alpha.x), which means Dependabot will offer
-    # alpha bumps. That is wanted: an alpha bump is exactly the change that needs a human
-    # looking at it, and the test suite is the gate.
+    # `quais` is itself a prerelease (1.0.0-alpha.x), so Dependabot will offer alpha bumps.
+    # That is wanted: an alpha bump is exactly the change that needs a human looking at it,
+    # and the test suite is the gate.
+    #
+    # It tracks the `devDependencies` pin, which is the version the suite runs against.
+    # It will NOT widen `peerDependencies.quais`, because that is a `a || b` allowlist
+    # rather than a semver range and no bot should be deciding what counts as tested.
+    # Accepting a quais PR therefore means doing three things by hand, listed in
+    # CONTRIBUTING.md: extend the allowlist, extend the `peer-range` matrix in ci.yml, and
+    # drop versions no longer covered. CI fails if the matrix and the range disagree.
     versioning-strategy: increase

@@ -40,7 +40,13 @@ publishes through trusted publishing (OIDC — no token). Bump the version and u
 - **Addresses entering a role or receiving value go through `assertQuaiAddress`.** Removal
   paths deliberately stay permissive.
 - **No `console` in `src/`.** A library should return or throw, not print. Lint enforces it.
-- **`quais` and the Supabase transport packages are pinned exactly, not ranged.** A
+- **`quais` is a peer dependency with an allowlist, not a range.**
+  `peerDependencies.quais` names the exact versions CI tests. Bumping quais means: add the
+  new version to the allowlist, add it to the `peer-range` matrix in `ci.yml`, bump the
+  `devDependencies` pin, and drop versions you are no longer testing. The CI job asserts the
+  matrix covers the declared range, so widening one without the other fails rather than
+  quietly shipping an untested claim.
+- **The Supabase transport packages are pinned exactly, not ranged.** A
   published tarball ships no lockfile, so a range means the version CI validated is not the
   version consumers install — and `npm install -g` gives them no way to override it. Bump
   the pins deliberately, with the suite as the gate; `.github/dependabot.yml` raises the PRs.
