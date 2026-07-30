@@ -8,6 +8,11 @@ version is `0.x`, minor bumps may contain breaking changes.
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-07-30
+
+Dependency hygiene only. No API change, no behaviour change — but the resolved dependency
+set a consumer installs does change, which is the entire point of the release.
+
 ### Changed
 
 - **`@supabase/postgrest-js` and `@supabase/realtime-js` pinned exactly**, `^2.110.9` →
