@@ -60,7 +60,7 @@
   "dependencies": {
     "@supabase/postgrest-js": "2.111.0",
     "@supabase/realtime-js": "2.111.0",
-    "quais": "1.0.0-alpha.55",
+    "quais": "1.0.0-alpha.56",
     "zod": "^3.25.76"
   },
   "devDependencies": {
