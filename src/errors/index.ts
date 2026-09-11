@@ -3,6 +3,7 @@ import type { DecodedRevert } from '../types.js';
 /** Machine-readable error codes. Stable across releases. */
 export type QuaiVaultErrorCode =
   | 'ABORTED'
+  | 'BROADCAST_UNKNOWN'
   | 'CONFIG'
   | 'NOT_CONNECTED'
   | 'NO_SIGNER'
@@ -68,6 +69,20 @@ export class AbortError extends QuaiVaultError {
 export class ConfigError extends QuaiVaultError {
   constructor(message: string, remediation?: string) {
     super('CONFIG', message, { remediation });
+  }
+}
+
+/** A transaction was submitted, but its final receipt could not be verified. */
+export class BroadcastError extends QuaiVaultError {
+  constructor(readonly chainTxHash: string, options: { cause?: unknown } = {}) {
+    super('BROADCAST_UNKNOWN', `Transaction ${chainTxHash} was submitted, but its final outcome is unknown.`, {
+      ...options,
+      remediation: 'Look up this chain transaction hash and reconcile its receipt before retrying. Do not blindly resubmit.',
+    });
+  }
+
+  override toJSON(): Record<string, unknown> {
+    return { ...super.toJSON(), chainTxHash: this.chainTxHash, changed: 'unknown' };
   }
 }
 

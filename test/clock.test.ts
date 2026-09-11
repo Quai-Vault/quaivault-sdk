@@ -20,7 +20,7 @@ const CHAIN_NOW = 1_700_000_000;
  * was reached at CHAIN_NOW with a one-hour delay, so it becomes executable at
  * CHAIN_NOW + 3600.
  */
-function stubConnection() {
+function stubConnection(approvedAt = CHAIN_NOW) {
   const contract = {
     getFunction(signature: string) {
       return (..._args: unknown[]) => {
@@ -46,7 +46,7 @@ function stubConnection() {
               timestamp: BigInt(CHAIN_NOW),
               expiration: 0n,
               executionDelay: 3600n,
-              approvedAt: BigInt(CHAIN_NOW),
+              approvedAt: BigInt(approvedAt),
               executed: false,
               cancelled: false,
             });
@@ -61,9 +61,9 @@ function stubConnection() {
   return { vault: () => contract, retry: { maxAttempts: 1 } } as unknown as Connection;
 }
 
-function vaultWithClock(now?: Clock): Vault {
+function vaultWithClock(now?: Clock, approvedAt = CHAIN_NOW): Vault {
   const ctx: VaultContext = {
-    connection: stubConnection(),
+    connection: stubConnection(approvedAt),
     indexer: null,
     queries: null,
     contracts: {
@@ -179,5 +179,11 @@ describe('duration arithmetic stays on the raw local clock', () => {
     expect(attempts).toBe(3);
     // Real elapsed time, measured against the real clock — bounded, not instant.
     expect(Date.now() - startedAt).toBeLessThan(5_000);
+  });
+});
+
+it('fails promptly when the timelock needs an execute call to start', async () => {
+  await expect(vaultWithClock(() => CHAIN_NOW, 0).waitForExecutable(TX)).rejects.toMatchObject({
+    code: 'PRECONDITION', remediation: expect.stringContaining('Call execute() once'),
   });
 });

@@ -1,3 +1,5 @@
+import { waitForReceipt } from './chain/receipt.js';
+import { QuaiVaultError } from './errors/index.js';
 import { getAddress } from 'quais';
 import { assertQuaiAddress } from './address.js';
 import type { Connection } from './chain/connection.js';
@@ -58,7 +60,11 @@ export class RecoveryModule {
   }
 
   private contract(write = false): RecoveryContract {
-    return new RecoveryContract(this.ctx.connection.socialRecovery(this.address, write), this.ctx.connection.retry);
+    return new RecoveryContract(
+      this.ctx.connection.socialRecovery(this.address, write),
+      this.ctx.connection.retry,
+      () => this.ctx.connection.assertWriteNetwork(),
+    );
   }
 
   private get vault(): Address {
@@ -248,7 +254,7 @@ export class RecoveryModule {
     const contract = this.contract(true);
     try {
       const sent = await contract.initiateRecovery(this.vault, newOwners, params.newThreshold);
-      const receipt = (await sent.wait()) as ReceiptLike;
+      const receipt = await waitForReceipt(sent);
       if (!receipt || receipt.status === 0) {
         throw new RevertError('The recovery initiation reverted.');
       }
@@ -587,7 +593,7 @@ export class RecoveryModule {
   ): Promise<{ chainTxHash: Hex }> {
     try {
       const sent = await call(this.contract(true));
-      const receipt = (await sent.wait()) as ReceiptLike;
+      const receipt = await waitForReceipt(sent);
       if (!receipt || receipt.status === 0) throw new RevertError(`${context}: reverted.`);
       return { chainTxHash: (receipt.hash ?? receipt.transactionHash ?? '') as Hex };
     } catch (err) {
@@ -615,7 +621,7 @@ export class RecoveryModule {
   }
 
   private toRevert(err: unknown, context: string): Error {
-    if (err instanceof RevertError || err instanceof PreconditionError) return err;
+    if (err instanceof QuaiVaultError) return err;
     const decoded = decodeRevertFromError(err);
     const base = err instanceof Error ? err.message : String(err);
     return new RevertError(`${context}${decoded ? `: ${decoded.message}` : `: ${base}`}`, decoded, {

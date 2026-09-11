@@ -130,6 +130,7 @@ export {
 export {
   QuaiVaultError,
   AbortError,
+  BroadcastError,
   ConfigError,
   NoSignerError,
   NoIndexerError,

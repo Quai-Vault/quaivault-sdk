@@ -10,7 +10,7 @@
  * time; applying it to a duration is a category error, because a clock being 12 seconds
  * fast does not make 30 seconds of backoff into 18.
  */
-import { AbortError } from '../errors/index.js';
+import { AbortError, ValidationError } from '../errors/index.js';
 
 export interface RetryOptions {
   /** Total attempts including the first. Default 3. */
@@ -95,8 +95,10 @@ function statusOf(error: unknown): number | undefined {
  * Errs toward *not* retrying: an unrecognised error is treated as permanent, so a
  * genuine bug surfaces immediately instead of being masked by three slow attempts.
  */
-export function isTransient(error: unknown): boolean {
+export function isTransient(error: unknown, seen = new Set<unknown>()): boolean {
   if (error === null || error === undefined) return false;
+  if (seen.has(error) || seen.size >= 32) return false;
+  seen.add(error);
 
   const code = (error as { code?: unknown }).code;
   if (typeof code === 'string') {
@@ -113,7 +115,7 @@ export function isTransient(error: unknown): boolean {
 
   // Unwrap one level — quais commonly wraps the transport error.
   const cause = (error as { cause?: unknown }).cause;
-  if (cause && cause !== error) return isTransient(cause);
+  if (cause && cause !== error) return isTransient(cause, seen);
 
   return false;
 }
@@ -145,6 +147,11 @@ export async function withRetry<T>(fn: () => Promise<T>, options: RetryOptions =
   const maxAttempts = options.maxAttempts ?? DEFAULTS.maxAttempts;
   const baseDelayMs = options.baseDelayMs ?? DEFAULTS.baseDelayMs;
   const maxDelayMs = options.maxDelayMs ?? DEFAULTS.maxDelayMs;
+  if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1 ||
+      !Number.isFinite(baseDelayMs) || baseDelayMs < 0 ||
+      !Number.isFinite(maxDelayMs) || maxDelayMs < 0 || maxDelayMs > 2_147_483_647) {
+    throw new ValidationError('Retry attempts must be a positive safe integer and delays must be finite, non-negative timer values.');
+  }
 
   let lastError: unknown;
 

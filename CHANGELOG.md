@@ -8,6 +8,27 @@ version is `0.x`, minor bumps may contain breaking changes.
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-09-11
+
+### Security
+
+- Check the configured chain ID against both read and signing providers before every
+  vault, factory, or recovery broadcast; validate external signer addresses as well.
+- Reject supplied deployment salts that yield a Qi address, invalid zone, or different
+  deployer shard. Invalid private-key scalars no longer leak into error messages.
+- Update Vitest to 4.1.11 and refresh vulnerable development dependencies. Pin release
+  actions, npm, and the contracts source revision used for ABI verification.
+
+### Fixed
+
+- Receipt lookup failures now raise `BroadcastError` (`BROADCAST_UNKNOWN`) carrying
+  `chainTxHash`; callers must reconcile before resubmitting. Typed configuration and
+  validation errors are preserved rather than disguised as contract reverts.
+- Reject invalid retry settings and cyclic error causes. Polling delays respond to
+  abort signals immediately, and invalid polling settings fail before querying.
+- `waitForExecutable()` fails promptly when quorum exists but the timelock clock
+  needs an `execute()` call to start it.
+
 ## [0.6.0] — 2026-07-30
 
 ### Breaking

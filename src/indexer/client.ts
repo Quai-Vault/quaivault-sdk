@@ -4,6 +4,7 @@ import type { z } from 'zod';
 import type { IndexerConfig, IndexerHealth, Page } from '../types.js';
 import { AbortError, IndexerQueryError } from '../errors/index.js';
 import { IndexerStateSchema, toNumber } from './schemas.js';
+import { validatePolling, wait } from '../chain/wait.js';
 
 /** Replaced at build time by tsup's `define`; absent when running from source. */
 declare const __SDK_VERSION__: string | undefined;
@@ -232,6 +233,7 @@ export class IndexerClient {
   ): Promise<{ reached: boolean; lastIndexedBlock: number }> {
     const timeoutMs = options.timeoutMs ?? 60_000;
     const pollIntervalMs = options.pollIntervalMs ?? 1_500;
+    validatePolling(timeoutMs, pollIntervalMs);
     const deadline = Date.now() + timeoutMs;
 
     for (;;) {
@@ -245,7 +247,7 @@ export class IndexerClient {
       if (Date.now() + pollIntervalMs > deadline) {
         return { reached: false, lastIndexedBlock: head };
       }
-      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+      await wait(pollIntervalMs, options.signal);
     }
   }
 

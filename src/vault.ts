@@ -1,3 +1,6 @@
+import { waitForReceipt } from './chain/receipt.js';
+import { validatePolling, wait as waitWithSignal } from './chain/wait.js';
+import { QuaiVaultError } from './errors/index.js';
 import { formatQuai, getAddress, getZoneForAddress, toShard } from 'quais';
 import { assertQuaiAddress, assertQuaiAddresses } from './address.js';
 import type { Connection } from './chain/connection.js';
@@ -175,7 +178,11 @@ export class Vault {
   }
 
   private contract(write = false): VaultContract {
-    return new VaultContract(this.ctx.connection.vault(this.address, write), this.ctx.connection.retry);
+    return new VaultContract(
+      this.ctx.connection.vault(this.address, write),
+      this.ctx.connection.retry,
+      () => this.ctx.connection.assertWriteNetwork(),
+    );
   }
 
   // =========================================================================
@@ -1101,7 +1108,7 @@ export class Vault {
       const sent = useFullOverload
         ? await writeVault.proposeTransactionFull(to, value, data, expiration, executionDelay)
         : await writeVault.proposeTransactionSimple(to, value, data);
-      receipt = (await sent.wait()) as ReceiptLike;
+      receipt = await waitForReceipt(sent);
     } catch (err) {
       throw toRevertError(err, 'Transaction proposal failed');
     }
@@ -1144,7 +1151,7 @@ export class Vault {
 
     try {
       const sent = await vault.approveTransaction(hash);
-      const receipt = (await sent.wait()) as ReceiptLike;
+      const receipt = await waitForReceipt(sent);
       assertReceipt(receipt, 'Approval', 'The approval transaction reverted.');
       return { chainTxHash: (receipt.hash ?? receipt.transactionHash ?? '') as Hex };
     } catch (err) {
@@ -1163,7 +1170,7 @@ export class Vault {
 
     try {
       const sent = await vault.revokeApproval(hash);
-      const receipt = (await sent.wait()) as ReceiptLike;
+      const receipt = await waitForReceipt(sent);
       assertReceipt(receipt, 'Revocation', 'The revocation transaction reverted.');
       return { chainTxHash: (receipt.hash ?? receipt.transactionHash ?? '') as Hex };
     } catch (err) {
@@ -1185,7 +1192,7 @@ export class Vault {
     const vault = this.contract(true);
     try {
       const sent = await vault.executeTransaction(hash);
-      const receipt = (await sent.wait()) as ReceiptLike;
+      const receipt = await waitForReceipt(sent);
       assertReceipt(receipt, 'Execution', 'The execution transaction reverted.');
       return classifyExecution(receipt, this.address, hash);
     } catch (err) {
@@ -1207,7 +1214,7 @@ export class Vault {
 
     try {
       const sent = await vault.approveAndExecute(hash);
-      const receipt = (await sent.wait()) as ReceiptLike;
+      const receipt = await waitForReceipt(sent);
       assertReceipt(receipt, 'Approve-and-execute', 'The transaction reverted.');
       return classifyExecution(receipt, this.address, hash);
     } catch (err) {
@@ -1235,7 +1242,7 @@ export class Vault {
 
     try {
       const sent = await this.contract(true).cancelTransaction(hash);
-      const receipt = (await sent.wait()) as ReceiptLike;
+      const receipt = await waitForReceipt(sent);
       assertReceipt(receipt, 'Cancellation', 'The cancellation reverted.');
       return { chainTxHash: (receipt.hash ?? receipt.transactionHash ?? '') as Hex };
     } catch (err) {
@@ -1248,7 +1255,7 @@ export class Vault {
     const hash = normalizeTxHash(txHash);
     try {
       const sent = await this.contract(true).expireTransaction(hash);
-      const receipt = (await sent.wait()) as ReceiptLike;
+      const receipt = await waitForReceipt(sent);
       assertReceipt(receipt, 'Expiry', 'The expiry transaction reverted.');
       return { chainTxHash: (receipt.hash ?? receipt.transactionHash ?? '') as Hex };
     } catch (err) {
@@ -1425,6 +1432,7 @@ export class Vault {
     const hash = normalizeTxHash(txHash);
     const timeoutMs = options.timeoutMs ?? 60 * 60 * 1000;
     const pollIntervalMs = options.pollIntervalMs ?? 15_000;
+    validatePolling(timeoutMs, pollIntervalMs);
     const deadline = Date.now() + timeoutMs;
 
     for (;;) {
@@ -1451,6 +1459,12 @@ export class Vault {
         );
       }
 
+      if (tx.executionDelay > 0 && tx.approvedAt === 0) {
+        throw new PreconditionError('The timelock clock has not started. Waiting cannot start it.', {
+          remediation: 'Call execute() once to start the timelock, then waitForExecutable() again.',
+        });
+      }
+
       // Timelocked with quorum: sleep until the clock lifts, or the next poll tick.
       // Absolute: `executableAfter` is chain time, so this comparison uses the
       // configured clock. The deadline and backoff below are elapsed-time arithmetic
@@ -1472,7 +1486,7 @@ export class Vault {
         );
       }
 
-      await new Promise((resolve) => setTimeout(resolve, wait));
+      await waitWithSignal(wait, options.signal);
     }
   }
 
@@ -1554,7 +1568,7 @@ function proposeOptionsOf(options: ProposeOptions): ProposeOptions {
 
 /** Wrap a provider/contract error with decoded revert data when available. */
 function toRevertError(err: unknown, context: string): Error {
-  if (err instanceof RevertError || err instanceof PreconditionError) return err;
+  if (err instanceof QuaiVaultError) return err;
   const decoded = decodeRevertFromError(err);
   const detail = decoded ? `: ${decoded.message}` : '';
   const base = err instanceof Error ? err.message : String(err);

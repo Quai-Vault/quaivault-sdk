@@ -31,6 +31,7 @@ export class RecoveryContract {
   constructor(
     readonly contract: Contract,
     private readonly retry: RetryOptions = {},
+    private readonly beforeWrite?: () => Promise<void>,
   ) {}
 
   private fn(signature: string) {
@@ -43,6 +44,11 @@ export class RecoveryContract {
    */
   private read<T>(signature: string, ...args: unknown[]): Promise<T> {
     return withRetry(() => this.fn(signature)(...args) as Promise<T>, this.retry);
+  }
+
+  private async write(signature: string, ...args: unknown[]): Promise<ContractTransactionResponse> {
+    await this.beforeWrite?.();
+    return this.fn(signature)(...args) as Promise<ContractTransactionResponse>;
   }
 
   get interface() {
@@ -118,7 +124,7 @@ export class RecoveryContract {
     newOwners: Address[],
     newThreshold: number,
   ): Promise<ContractTransactionResponse> {
-    return this.fn('initiateRecovery(address,address[],uint256)')(
+    return this.write('initiateRecovery(address,address[],uint256)',
       vault,
       newOwners,
       newThreshold,
@@ -126,7 +132,7 @@ export class RecoveryContract {
   }
 
   approveRecovery(vault: Address, recoveryHash: Bytes32): Promise<ContractTransactionResponse> {
-    return this.fn('approveRecovery(address,bytes32)')(
+    return this.write('approveRecovery(address,bytes32)',
       vault,
       recoveryHash,
     ) as Promise<ContractTransactionResponse>;
@@ -136,28 +142,28 @@ export class RecoveryContract {
     vault: Address,
     recoveryHash: Bytes32,
   ): Promise<ContractTransactionResponse> {
-    return this.fn('revokeRecoveryApproval(address,bytes32)')(
+    return this.write('revokeRecoveryApproval(address,bytes32)',
       vault,
       recoveryHash,
     ) as Promise<ContractTransactionResponse>;
   }
 
   executeRecovery(vault: Address, recoveryHash: Bytes32): Promise<ContractTransactionResponse> {
-    return this.fn('executeRecovery(address,bytes32)')(
+    return this.write('executeRecovery(address,bytes32)',
       vault,
       recoveryHash,
     ) as Promise<ContractTransactionResponse>;
   }
 
   cancelRecovery(vault: Address, recoveryHash: Bytes32): Promise<ContractTransactionResponse> {
-    return this.fn('cancelRecovery(address,bytes32)')(
+    return this.write('cancelRecovery(address,bytes32)',
       vault,
       recoveryHash,
     ) as Promise<ContractTransactionResponse>;
   }
 
   expireRecovery(vault: Address, recoveryHash: Bytes32): Promise<ContractTransactionResponse> {
-    return this.fn('expireRecovery(address,bytes32)')(
+    return this.write('expireRecovery(address,bytes32)',
       vault,
       recoveryHash,
     ) as Promise<ContractTransactionResponse>;

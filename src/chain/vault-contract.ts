@@ -31,6 +31,7 @@ export class VaultContract {
   constructor(
     readonly contract: Contract,
     private readonly retry: RetryOptions = {},
+    private readonly beforeWrite?: () => Promise<void>,
   ) {}
 
   private fn(signature: string) {
@@ -43,6 +44,11 @@ export class VaultContract {
    */
   private read<T>(signature: string, ...args: unknown[]): Promise<T> {
     return withRetry(() => this.fn(signature)(...args) as Promise<T>, this.retry);
+  }
+
+  private async write(signature: string, ...args: unknown[]): Promise<ContractTransactionResponse> {
+    await this.beforeWrite?.();
+    return this.fn(signature)(...args) as Promise<ContractTransactionResponse>;
   }
 
   get interface() {
@@ -128,7 +134,7 @@ export class VaultContract {
     expiration: number,
     executionDelay: number,
   ): Promise<ContractTransactionResponse> {
-    return this.fn('proposeTransaction(address,uint256,bytes,uint48,uint32)')(
+    return this.write('proposeTransaction(address,uint256,bytes,uint48,uint32)',
       to,
       value,
       data,
@@ -142,7 +148,7 @@ export class VaultContract {
     value: bigint,
     data: Hex,
   ): Promise<ContractTransactionResponse> {
-    return this.fn('proposeTransaction(address,uint256,bytes)')(
+    return this.write('proposeTransaction(address,uint256,bytes)',
       to,
       value,
       data,
@@ -150,27 +156,27 @@ export class VaultContract {
   }
 
   approveTransaction(txHash: Bytes32): Promise<ContractTransactionResponse> {
-    return this.fn('approveTransaction(bytes32)')(txHash) as Promise<ContractTransactionResponse>;
+    return this.write('approveTransaction(bytes32)', txHash) as Promise<ContractTransactionResponse>;
   }
 
   approveAndExecute(txHash: Bytes32): Promise<ContractTransactionResponse> {
-    return this.fn('approveAndExecute(bytes32)')(txHash) as Promise<ContractTransactionResponse>;
+    return this.write('approveAndExecute(bytes32)', txHash) as Promise<ContractTransactionResponse>;
   }
 
   executeTransaction(txHash: Bytes32): Promise<ContractTransactionResponse> {
-    return this.fn('executeTransaction(bytes32)')(txHash) as Promise<ContractTransactionResponse>;
+    return this.write('executeTransaction(bytes32)', txHash) as Promise<ContractTransactionResponse>;
   }
 
   revokeApproval(txHash: Bytes32): Promise<ContractTransactionResponse> {
-    return this.fn('revokeApproval(bytes32)')(txHash) as Promise<ContractTransactionResponse>;
+    return this.write('revokeApproval(bytes32)', txHash) as Promise<ContractTransactionResponse>;
   }
 
   cancelTransaction(txHash: Bytes32): Promise<ContractTransactionResponse> {
-    return this.fn('cancelTransaction(bytes32)')(txHash) as Promise<ContractTransactionResponse>;
+    return this.write('cancelTransaction(bytes32)', txHash) as Promise<ContractTransactionResponse>;
   }
 
   expireTransaction(txHash: Bytes32): Promise<ContractTransactionResponse> {
-    return this.fn('expireTransaction(bytes32)')(txHash) as Promise<ContractTransactionResponse>;
+    return this.write('expireTransaction(bytes32)', txHash) as Promise<ContractTransactionResponse>;
   }
 
   encode(signature: string, args: unknown[]): Hex {
@@ -189,6 +195,7 @@ export class FactoryContract {
   constructor(
     readonly contract: Contract,
     private readonly retry: RetryOptions = {},
+    private readonly beforeWrite?: () => Promise<void>,
   ) {}
 
   private fn(signature: string) {
@@ -201,6 +208,11 @@ export class FactoryContract {
    */
   private read<T>(signature: string, ...args: unknown[]): Promise<T> {
     return withRetry(() => this.fn(signature)(...args) as Promise<T>, this.retry);
+  }
+
+  private async write(signature: string, ...args: unknown[]): Promise<ContractTransactionResponse> {
+    await this.beforeWrite?.();
+    return this.fn(signature)(...args) as Promise<ContractTransactionResponse>;
   }
 
   get interface() {
@@ -253,7 +265,7 @@ export class FactoryContract {
     initialModules: Address[],
     initialDelegatecallTargets: Address[],
   ): Promise<ContractTransactionResponse> {
-    return this.fn('createWallet(address[],uint256,bytes32,uint32,address[],address[])')(
+    return this.write('createWallet(address[],uint256,bytes32,uint32,address[],address[])',
       owners,
       threshold,
       salt,
@@ -264,6 +276,6 @@ export class FactoryContract {
   }
 
   registerWallet(wallet: Address): Promise<ContractTransactionResponse> {
-    return this.fn('registerWallet(address)')(wallet) as Promise<ContractTransactionResponse>;
+    return this.write('registerWallet(address)', wallet) as Promise<ContractTransactionResponse>;
   }
 }

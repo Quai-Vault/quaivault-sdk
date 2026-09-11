@@ -12,6 +12,8 @@ import type { Address } from '../types.js';
 import { ConfigError, NoSignerError, ValidationError } from '../errors/index.js';
 import type { ResolvedConfig } from '../config/resolve.js';
 import type { RetryOptions } from './retry.js';
+import { withRetry } from './retry.js';
+import { assertQuaiAddress } from '../address.js';
 
 /**
  * Owns the provider/signer pair and hands out contract instances.
@@ -24,9 +26,11 @@ export class Connection {
   /** Retry policy for reads. Shared with every contract facade this hands out. */
   readonly retry: RetryOptions;
   private readonly _signer: Signer | null;
+  private readonly chainId: number;
 
   constructor(config: ResolvedConfig, explicit: { provider?: Provider; signer?: Signer } = {}) {
     this.retry = config.retry ?? {};
+    this.chainId = config.network.chainId;
     this.provider =
       explicit.provider ??
       (explicit.signer?.provider as Provider | undefined) ??
@@ -47,6 +51,23 @@ export class Connection {
 
   hasSigner(): boolean {
     return this._signer !== null;
+  }
+
+  /** Check both the read RPC and signing RPC immediately before each broadcast. */
+  async assertWriteNetwork(): Promise<void> {
+    const signer = this.requireSigner('Writing to the chain');
+    assertQuaiAddress(await signer.getAddress(), 'signer');
+    if (!signer.provider) throw new ConfigError('The signer must be connected to a provider.');
+    const providers = new Set([this.provider, signer.provider]);
+    for (const provider of providers) {
+      const network = await withRetry(() => provider.getNetwork(), this.retry);
+      if (BigInt(network.chainId) !== BigInt(this.chainId)) {
+        throw new ConfigError(
+          `RPC chain ID ${network.chainId} does not match configured chain ID ${this.chainId}.`,
+          'Connect the signer and read provider to the selected network before signing.',
+        );
+      }
+    }
   }
 
   /** The signer, or a typed error naming the operation that needs one. */
@@ -141,11 +162,7 @@ function createPrivateKeySigner(privateKey: string, provider: Provider): Signer 
     return wallet as unknown as Signer;
   } catch (cause) {
     if (cause instanceof ConfigError) throw cause;
-    throw new ConfigError(
-      `Could not build a signer from the supplied private key: ${
-        cause instanceof Error ? cause.message : String(cause)
-      }`,
-    );
+    throw new ConfigError('Could not build a signer from the supplied private key. Check that it is a valid secp256k1 key.');
   }
 }
 

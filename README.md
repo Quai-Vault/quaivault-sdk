@@ -228,7 +228,8 @@ vault.approve(h) / approveAndExecute(h) / execute(h) / revokeApproval(h) / cance
 ```
 
 `waitForExecutable` polls the chain until a transaction is `ready`, and fails fast rather
-than spinning when waiting cannot help — below quorum, or already terminal.
+than spinning when waiting cannot help — below quorum, already terminal, or waiting for an unstarted timelock clock. In the last
+case, call `execute()` once to start the clock, then wait again.
 
 Every `propose.*` accepts `{ expiration, executionDelay, dryRun }`. With `dryRun: true` you
 get the encoded calldata, a gas estimate, and any predicted revert — without signing.
@@ -346,6 +347,14 @@ const qv = connect({
   retry: { maxAttempts: 4, baseDelayMs: 250, onRetry: ({ attempt, error }) => log(attempt, error) },
 });
 ```
+
+Before each high-level write, the SDK verifies that both the read provider and the
+signer's provider report the configured chain ID. An external signer must be connected
+to a provider and have a usable Quai address. A mismatch raises `CONFIG` before broadcast.
+
+If a transaction is submitted but its receipt cannot be verified, the SDK raises
+`BroadcastError` with code `BROADCAST_UNKNOWN` and the submitted `chainTxHash`. Reconcile
+that hash on chain before trying again; a receipt timeout does not mean the write failed.
 
 **Writes are never retried.** A resubmit that looks like a timeout to the client may already
 be in the mempool, so retrying risks a double broadcast. Only reads go through the policy.

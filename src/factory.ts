@@ -1,4 +1,6 @@
-import { Interface, getAddress } from 'quais';
+import { waitForReceipt } from './chain/receipt.js';
+import { QuaiVaultError } from './errors/index.js';
+import { Interface, getAddress, getZoneForAddress } from 'quais';
 import { assertQuaiAddress, assertQuaiAddresses } from './address.js';
 import { QuaiVaultFactoryAbi } from './abi/index.js';
 import type { Connection } from './chain/connection.js';
@@ -49,7 +51,11 @@ export class Factory {
   }
 
   private contract(write = false): FactoryContract {
-    return new FactoryContract(this.ctx.connection.factory(this.address, write), this.ctx.connection.retry);
+    return new FactoryContract(
+      this.ctx.connection.factory(this.address, write),
+      this.ctx.connection.retry,
+      () => this.ctx.connection.assertWriteNetwork(),
+    );
   }
 
   /** The implementation every proxy from this factory delegates to. */
@@ -193,6 +199,11 @@ export class Factory {
       });
     }
 
+    assertQuaiAddress(predictedAddress, 'predicted vault');
+    if (getZoneForAddress(predictedAddress) !== getZoneForAddress(deployer)) {
+      throw new ValidationError('The salt would deploy a vault outside the deployer\'s shard. Re-mine it for this signer and these parameters.');
+    }
+
     onProgress?.({ step: 'deploying', message: 'Submitting the deployment…', predictedAddress });
 
     const factory = this.contract(true);
@@ -209,8 +220,9 @@ export class Factory {
       );
       chainTxHash = sent.hash as Hex;
       onProgress?.({ step: 'confirming', message: 'Waiting for confirmation…', chainTxHash });
-      receipt = (await sent.wait()) as ReceiptLike;
+      receipt = await waitForReceipt(sent);
     } catch (err) {
+      if (err instanceof QuaiVaultError) throw err;
       const decoded = decodeRevertFromError(err);
       throw new RevertError(
         `Vault creation failed${decoded ? `: ${decoded.message}` : ''}`,
@@ -247,13 +259,13 @@ export class Factory {
     const factory = this.contract(true);
     try {
       const sent = await factory.registerWallet(getAddress(vault));
-      const receipt = (await sent.wait()) as ReceiptLike;
+      const receipt = await waitForReceipt(sent);
       if (!receipt || receipt.status === 0) {
         throw new RevertError('Registration reverted.');
       }
       return { chainTxHash: (receipt.hash ?? receipt.transactionHash ?? '') as Hex };
     } catch (err) {
-      if (err instanceof RevertError) throw err;
+      if (err instanceof QuaiVaultError) throw err;
       const decoded = decodeRevertFromError(err);
       throw new RevertError(
         `Registering the vault failed${decoded ? `: ${decoded.message}` : ''}`,
