@@ -8,6 +8,11 @@ version is `0.x`, minor bumps may contain breaking changes.
 
 ## [Unreleased]
 
+### Changed
+
+- Point the mainnet `explorerUrl` at `https://explorer.qu.ai`; Orchard stays on
+  `https://orchard.quaiscan.io`.
+
 ## [0.6.1] — 2026-09-11
 
 ### Security

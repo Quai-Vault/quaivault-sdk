@@ -24,7 +24,7 @@ export const mainnet: NetworkConfig = {
   name: 'mainnet',
   chainId: 9,
   rpcUrl: 'https://rpc.quai.network',
-  explorerUrl: 'https://quaiscan.io',
+  explorerUrl: 'https://explorer.qu.ai',
   contracts: {
     implementation: '0x0038E6d84412A10CdcE41b0f62A05350023f1fb6',
     factory: '0x003613aC5FFd45bFF7B2F0210DA2fF660908c488',
