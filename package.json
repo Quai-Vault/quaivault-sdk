@@ -58,8 +58,8 @@
     "prepublishOnly": "npm run sync-abis -- --check && npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
-    "@supabase/postgrest-js": "2.111.0",
-    "@supabase/realtime-js": "2.111.0",
+    "@supabase/postgrest-js": "2.116.0",
+    "@supabase/realtime-js": "2.116.0",
     "zod": "^3.25.76"
   },
   "peerDependencies": {
